@@ -1,0 +1,39 @@
+{
+  "title": "Deye Energy Manager",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Deye Energy Manager",
+        "description": "Select Deye/ESPHome and Pstryk entities used to control the inverter.",
+        "data": {
+          "name": "Name",
+          "work_mode_select": "Inverter work mode",
+          "max_sell_power_number": "Maximum sell power",
+          "discharge_current_number": "Maximum battery discharge current",
+          "charge_current_number": "Maximum battery charge current",
+          "grid_charge_current_number": "Maximum grid charge current",
+          "battery_soc_sensor": "Battery SOC sensor",
+          "price_sensor": "Sell price sensor today",
+          "sell_price_tomorrow_sensor": "Sell price sensor tomorrow",
+          "buy_price_today_sensor": "Buy price sensor today",
+          "buy_price_tomorrow_sensor": "Buy price sensor tomorrow",
+          "grid_power_sensor": "Grid power sensor",
+          "solcast_current_power_sensor": "Solcast current power",
+          "solcast_forecast_today_sensor": "Solcast forecast today",
+          "solcast_forecast_tomorrow_sensor": "Solcast forecast tomorrow",
+          "solcast_forecast_day_3_sensor": "Solcast forecast day 3",
+          "solcast_forecast_day_4_sensor": "Solcast forecast day 4",
+          "solcast_forecast_day_5_sensor": "Solcast forecast day 5",
+          "solcast_forecast_day_6_sensor": "Solcast forecast day 6",
+          "solcast_forecast_day_7_sensor": "Solcast forecast day 7",
+          "solcast_remaining_today_sensor": "Solcast remaining forecast today",
+          "solcast_peak_power_today_sensor": "Solcast peak power today",
+          "solcast_peak_time_today_sensor": "Solcast peak power time today"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Deye Energy Manager is already configured."
+    }
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "title": "Deye Energy Manager",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Deye Energy Manager",
+        "description": "Wybierz encje Deye/ESPHome i Pstryk używane do sterowania falownikiem.",
+        "data": {
+          "name": "Nazwa",
+          "work_mode_select": "Tryb pracy falownika",
+          "max_sell_power_number": "Maksymalna moc sprzedaży",
+          "discharge_current_number": "Maksymalny prąd rozładowania",
+          "charge_current_number": "Maksymalny prąd ładowania",
+          "grid_charge_current_number": "Maksymalny prąd ładowania z sieci",
+          "battery_soc_sensor": "Sensor SOC baterii",
+          "price_sensor": "Sensor ceny sprzedaży dziś",
+          "sell_price_tomorrow_sensor": "Sensor ceny sprzedaży jutro",
+          "buy_price_today_sensor": "Sensor ceny zakupu dziś",
+          "buy_price_tomorrow_sensor": "Sensor ceny zakupu jutro",
+          "grid_power_sensor": "Sensor mocy sieci",
+          "solcast_current_power_sensor": "Solcast: aktualna moc",
+          "solcast_forecast_today_sensor": "Solcast: prognoza na dziś",
+          "solcast_forecast_tomorrow_sensor": "Solcast: prognoza na jutro",
+          "solcast_forecast_day_3_sensor": "Solcast: prognoza dzień 3",
+          "solcast_forecast_day_4_sensor": "Solcast: prognoza dzień 4",
+          "solcast_forecast_day_5_sensor": "Solcast: prognoza dzień 5",
+          "solcast_forecast_day_6_sensor": "Solcast: prognoza dzień 6",
+          "solcast_forecast_day_7_sensor": "Solcast: prognoza dzień 7",
+          "solcast_remaining_today_sensor": "Solcast: pozostała prognoza na dziś",
+          "solcast_peak_power_today_sensor": "Solcast: szczytowa moc dzisiaj",
+          "solcast_peak_time_today_sensor": "Solcast: czas szczytowej mocy dzisiaj"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Deye Energy Manager jest już skonfigurowany."
+    }
+  }
+}

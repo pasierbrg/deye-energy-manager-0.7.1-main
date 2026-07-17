@@ -1,0 +1,7 @@
+title: Deye Energy Manager
+views:
+  - title: Manager
+    path: deye-energy-manager
+    icon: mdi:solar-power-variant
+    cards:
+      - type: custom:deye-energy-manager-card

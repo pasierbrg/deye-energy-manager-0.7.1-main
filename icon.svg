@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Deye Energy Manager">
+  <defs>
+    <linearGradient id="bg" x1="32" y1="16" x2="224" y2="240" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#08dfe3"/>
+      <stop offset="0.48" stop-color="#1186c9"/>
+      <stop offset="1" stop-color="#1e357d"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="66" y1="108" x2="148" y2="192" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4fd8ff"/>
+      <stop offset="1" stop-color="#0f5c9a"/>
+    </linearGradient>
+    <linearGradient id="battery" x1="146" y1="100" x2="218" y2="174" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#b9f8ff"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#07131f" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <rect width="256" height="256" rx="54" fill="url(#bg)"/>
+  <circle cx="74" cy="66" r="27" fill="#ffe66d"/>
+  <g stroke="#ffe66d" stroke-width="8" stroke-linecap="round" opacity="0.92">
+    <path d="M74 21v14"/>
+    <path d="M74 97v14"/>
+    <path d="M29 66h14"/>
+    <path d="M105 66h14"/>
+    <path d="M42 34l10 10"/>
+    <path d="M96 88l10 10"/>
+    <path d="M106 34l-10 10"/>
+    <path d="M52 88l-10 10"/>
+  </g>
+
+  <g filter="url(#shadow)">
+    <path d="M48 132c0-8 6-14 14-14h75c7 0 13 5 14 12l11 66H62c-8 0-14-6-14-14v-50z" fill="url(#panel)"/>
+    <path d="M64 134h78M59 158h88M56 182h96M86 119l-16 77M116 119l-10 77" stroke="#d8fbff" stroke-width="5" opacity="0.9"/>
+    <path d="M48 132c0-8 6-14 14-14h75c7 0 13 5 14 12l11 66H62c-8 0-14-6-14-14v-50z" fill="none" stroke="#d8fbff" stroke-width="5"/>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="145" y="92" width="70" height="90" rx="15" fill="url(#battery)" stroke="#ffffff" stroke-width="6"/>
+    <rect x="167" y="78" width="26" height="14" rx="5" fill="#ffffff"/>
+    <path d="M180 110l-22 42h21l-8 33 30-48h-23l2-27z" fill="#16b97a"/>
+  </g>
+
+  <path d="M42 214h172" stroke="#cbfbff" stroke-width="8" stroke-linecap="round" opacity="0.75"/>
+</svg>

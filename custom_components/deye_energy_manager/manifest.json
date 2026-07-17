@@ -1,0 +1,14 @@
+{
+  "domain": "deye_energy_manager",
+  "name": "Deye Energy Manager",
+  "codeowners": [
+    "@pasierbrg"
+  ],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/pasierbrg/deye-energy-manager-0.7.1",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/pasierbrg/deye-energy-manager-0.7.1/issues",
+  "requirements": [],
+  "version": "0.7.5"
+}

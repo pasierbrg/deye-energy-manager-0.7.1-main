@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" role="img" aria-label="Deye Energy Manager iOS dark blue red theme">
+  <defs>
+    <linearGradient id="card" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#050812"/><stop offset="1" stop-color="#0b1b36"/></linearGradient>
+    <linearGradient id="head" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#0a84ff"/><stop offset=".65" stop-color="#195cff"/><stop offset="1" stop-color="#ff375f"/></linearGradient>
+    <style>
+      .bg{fill:#02050d}.panel{fill:#0f1d34;stroke:#64d2ff;stroke-opacity:.58}.head{fill:url(#head)}.cell{fill:#081324;stroke:#29496b}.btn{fill:#14345d;stroke:#64d2ff}.red{fill:#30203f;stroke:#ff375f}.text{fill:#f8fbff;font:700 14px Arial}.title{fill:#fff;font:800 18px Arial}.small{fill:#a9c8e8;font:12px Arial}.good{fill:#30d158;font:800 13px Arial}.warn{fill:#ffd60a;font:800 13px Arial}
+    </style>
+  </defs>
+  <rect class="bg" width="1280" height="720"/>
+  <rect x="20" y="20" width="1240" height="680" rx="14" fill="url(#card)" stroke="#233f64"/>
+  <rect class="panel" x="42" y="42" width="1196" height="120" rx="8"/><rect class="head" x="42" y="42" width="1196" height="34" rx="8"/>
+  <text class="title" x="60" y="66">Status energii</text>
+  <g>
+    <rect class="cell" x="60" y="88" width="270" height="52" rx="7"/><text class="small" x="74" y="106">Tryb</text><text class="good" x="74" y="128">Harmonogram sprzedazy</text>
+    <rect class="cell" x="344" y="88" width="270" height="52" rx="7"/><text class="small" x="358" y="106">PV</text><text class="text" x="358" y="128">5279 W</text>
+    <rect class="cell" x="628" y="88" width="270" height="52" rx="7"/><text class="small" x="642" y="106">Sprzedane dzisiaj</text><text class="text" x="642" y="128">5.920 kWh / 4.18 PLN</text>
+    <rect class="cell" x="912" y="88" width="270" height="52" rx="7"/><text class="small" x="926" y="106">Aktywny slot</text><text class="text" x="926" y="128">18-19</text>
+  </g>
+  <rect class="btn" x="42" y="180" width="380" height="48" rx="9"/><text class="text" x="232" y="210" text-anchor="middle">ON Sprzedawaj</text>
+  <rect class="btn" x="450" y="180" width="380" height="48" rx="9"/><text class="text" x="640" y="210" text-anchor="middle">Zatrzymaj</text>
+  <rect class="red" x="858" y="180" width="380" height="48" rx="9"/><text class="text" x="1048" y="210" text-anchor="middle">Domyslne</text>
+  <rect class="panel" x="42" y="250" width="370" height="220" rx="8"/><rect class="head" x="42" y="250" width="370" height="34"/><text class="title" x="58" y="273">Ceny sprzedazy</text>
+  <text class="small" x="62" y="310">Godz.</text><text class="small" x="165" y="310">Dzisiaj</text><text class="small" x="275" y="310">Jutro</text>
+  <text class="text" x="62" y="342">18-19</text><text class="good" x="165" y="342">0.744</text><text class="good" x="275" y="342">0.690</text>
+  <text class="text" x="62" y="374">19-20</text><text class="good" x="165" y="374">0.812</text><text class="good" x="275" y="374">0.801</text>
+  <text class="text" x="62" y="406">20-21</text><text class="warn" x="165" y="406">0.530</text><text class="good" x="275" y="406">0.641</text>
+  <rect class="panel" x="436" y="250" width="370" height="220" rx="8"/><rect class="head" x="436" y="250" width="370" height="34"/><text class="title" x="452" y="273">Odczyty managera</text>
+  <text class="small" x="456" y="310">CEL</text><text class="small" x="620" y="310">OBECNIE</text>
+  <text class="good" x="456" y="342">Selling First</text><text class="text" x="620" y="342">Selling First</text>
+  <text class="good" x="456" y="374">3000 W</text><text class="text" x="620" y="374">3000 W</text>
+  <text class="good" x="456" y="406">120 A</text><text class="text" x="620" y="406">120 A</text>
+  <rect class="panel" x="830" y="250" width="408" height="220" rx="8"/><rect class="head" x="830" y="250" width="408" height="34"/><text class="title" x="846" y="273">Statystyki sprzedazy</text>
+  <text class="small" x="852" y="314">Dzisiaj</text><text class="good" x="852" y="338">5.920 kWh / 4.18 PLN</text>
+  <text class="small" x="852" y="374">Tydzien</text><text class="good" x="852" y="398">31.2 kWh / 22.40 PLN</text>
+  <g transform="translate(1040 322)"><rect width="16" height="54" fill="#30d158"/><rect x="24" y="-14" width="16" height="68" fill="#64d2ff"/><rect x="48" y="-34" width="16" height="88" fill="#ffd60a"/><rect x="72" y="8" width="16" height="46" fill="#30d158"/><rect x="96" y="-8" width="16" height="62" fill="#64d2ff"/></g>
+  <rect class="panel" x="42" y="496" width="1196" height="160" rx="8"/><rect class="head" x="42" y="496" width="1196" height="34"/><text class="title" x="58" y="519">Harmonogram sprzedazy 24h</text>
+  <text class="small" x="62" y="558">Godziny</text><text class="small" x="248" y="558">Sprzedaz</text><text class="small" x="480" y="558">Ustawienia</text>
+  <text class="text" x="62" y="594">18:00-19:00</text><text class="good" x="248" y="594">tak</text><text class="good" x="480" y="594">Selling First / 3000 W / roz. 120 A / lad. 50 A / SOC 30%</text>
+  <text class="text" x="62" y="632">19:00-20:00</text><text class="good" x="248" y="632">tak</text><text class="good" x="480" y="632">Selling First / 3500 W / roz. 120 A / lad. 0 A / SOC 40%</text>
+</svg>

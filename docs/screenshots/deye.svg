@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 980" role="img" aria-label="Deye Energy Manager 0.7 dashboard">
+  <defs>
+    <style>
+      .bg{fill:#06151b}.panel{fill:#112434;stroke:#56b9c9;stroke-width:1.2}.head{fill:#09a7bd}.sub{fill:#16364d}.row{fill:#102635}.active{fill:#174b6c}.btn{fill:#173a57;stroke:#6fcde8}.btn2{fill:#0b6373;stroke:#6fcde8}.text{fill:#fff;font:700 14px Arial}.title{fill:#fff;font:800 19px Arial}.small{fill:#b9d7e6;font:12px Arial}.good{fill:#35ff8d;font:800 13px Arial}.warn{fill:#ffd166;font:800 13px Arial}.line{stroke:#28465a;stroke-width:1}
+    </style>
+  </defs>
+  <rect class="bg" width="1500" height="980"/>
+  <rect class="panel" x="16" y="16" width="1468" height="150" rx="7"/><rect class="head" x="16" y="16" width="1468" height="36" rx="7"/>
+  <text class="title" x="34" y="40">Status energii</text>
+  <g>
+    <rect class="row" x="32" y="64" width="342" height="38" rx="5"/><text class="small" x="44" y="80">Tryb</text><text class="good" x="44" y="97">Harmonogram sprzedazy</text>
+    <rect class="row" x="382" y="64" width="342" height="38" rx="5"/><text class="small" x="394" y="80">PV</text><text class="text" x="394" y="97">3521 W</text>
+    <rect class="row" x="732" y="64" width="342" height="38" rx="5"/><text class="small" x="744" y="80">Dom</text><text class="text" x="744" y="97">638 W</text>
+    <rect class="row" x="1082" y="64" width="342" height="38" rx="5"/><text class="small" x="1094" y="80">Siec</text><text class="text" x="1094" y="97">-1553 W</text>
+    <rect class="row" x="32" y="112" width="342" height="38" rx="5"/><text class="small" x="44" y="128">Bateria</text><text class="text" x="44" y="145">1897 W</text>
+    <rect class="row" x="382" y="112" width="342" height="38" rx="5"/><text class="small" x="394" y="128">SOC</text><text class="text" x="394" y="145">80%</text>
+    <rect class="row" x="732" y="112" width="342" height="38" rx="5"/><text class="small" x="744" y="128">Sprzedane dzisiaj</text><text class="text" x="744" y="145">4.823 kWh / 3.42 PLN</text>
+    <rect class="row" x="1082" y="112" width="342" height="38" rx="5"/><text class="small" x="1094" y="128">Aktywny slot</text><text class="text" x="1094" y="145">18-19</text>
+  </g>
+  <rect class="btn" x="16" y="180" width="468" height="44" rx="7"/><text class="text" x="250" y="207" text-anchor="middle">ON Sprzedawaj</text>
+  <rect class="btn2" x="516" y="180" width="468" height="44" rx="7"/><text class="text" x="750" y="207" text-anchor="middle">Zatrzymaj</text>
+  <rect class="btn" x="1016" y="180" width="468" height="44" rx="7"/><text class="text" x="1250" y="207" text-anchor="middle">Domyslne</text>
+  <g>
+    <rect class="panel" x="16" y="242" width="480" height="250" rx="7"/><rect class="head" x="16" y="242" width="480" height="38"/><text class="title" x="32" y="267">Ceny sprzedazy</text>
+    <text class="small" x="32" y="308">Godz.</text><text class="small" x="170" y="308">Dzisiaj</text><text class="small" x="310" y="308">Jutro</text>
+    <path class="line" d="M16 320H496 M16 348H496 M16 376H496 M16 404H496 M16 432H496 M16 460H496"/>
+    <text class="text" x="32" y="340">17-18</text><text class="warn" x="170" y="340">0.561</text><text class="good" x="310" y="340">0.701</text>
+    <text class="text" x="32" y="368">18-19</text><text class="good" x="170" y="368">0.744</text><text class="good" x="310" y="368">0.690</text>
+    <text class="text" x="32" y="396">19-20</text><text class="good" x="170" y="396">0.812</text><text class="good" x="310" y="396">0.801</text>
+    <text class="text" x="32" y="424">20-21</text><text class="warn" x="170" y="424">0.530</text><text class="good" x="310" y="424">0.641</text>
+    <rect class="panel" x="514" y="242" width="456" height="250" rx="7"/><rect class="head" x="514" y="242" width="456" height="38"/><text class="title" x="530" y="267">Odczyty managera</text>
+    <text class="small" x="530" y="308">CEL</text><text class="small" x="742" y="308">OBECNIE</text>
+    <text class="good" x="530" y="340">Selling First</text><text class="text" x="742" y="340">Selling First</text>
+    <text class="good" x="530" y="374">3000 W</text><text class="text" x="742" y="374">3000 W</text>
+    <text class="good" x="530" y="408">120 A roz.</text><text class="text" x="742" y="408">120 A roz.</text>
+    <text class="good" x="530" y="442">50 A lad.</text><text class="text" x="742" y="442">50 A lad.</text>
+    <rect class="panel" x="988" y="242" width="496" height="250" rx="7"/><rect class="head" x="988" y="242" width="496" height="38"/><text class="title" x="1004" y="267">Ochrona</text>
+    <text class="good" x="1004" y="326">Sprzedaz dozwolona</text><text class="good" x="1410" y="326">on</text>
+    <text class="good" x="1004" y="366">Ladowanie dozwolone</text><text class="good" x="1410" y="366">on</text>
+    <text class="text" x="1004" y="406">Min SOC sprzedazy</text><text class="text" x="1390" y="406">30%</text>
+    <text class="text" x="1004" y="446">Sprzedawaj od ceny</text><text class="text" x="1372" y="446">0.70 PLN</text>
+  </g>
+  <rect class="panel" x="16" y="512" width="1468" height="270" rx="7"/><rect class="head" x="16" y="512" width="1468" height="38"/><text class="title" x="32" y="537">Harmonogram sprzedazy 24h</text>
+  <rect class="sub" x="16" y="550" width="1468" height="32"/><text class="small" x="32" y="570">Godziny</text><text class="small" x="250" y="570">Sprzedaz</text><text class="small" x="520" y="570">Ustawienia</text><text class="small" x="1330" y="570">Ustaw</text>
+  <g class="text">
+    <text x="32" y="610">00:00-01:00</text><text x="250" y="610">nie</text><text x="520" y="610">Zero Export / 0 W / roz. 0 A / lad. 0 A / SOC 20%</text><rect class="btn" x="1320" y="592" width="80" height="28" rx="5"/>
+    <text x="32" y="642">01:00-02:00</text><text x="250" y="642">nie</text><text x="520" y="642">Zero Export / 0 W / roz. 0 A / lad. 0 A / SOC 20%</text>
+    <text x="32" y="674">10:00-11:00</text><text class="good" x="250" y="674">tak</text><text class="good" x="520" y="674">Selling First / 2500 W / roz. 80 A / lad. 0 A / SOC 40%</text>
+    <rect class="active" x="16" y="692" width="1468" height="34"/><text x="32" y="716">18:00-19:00</text><text class="good" x="250" y="716">tak</text><text class="good" x="520" y="716">Selling First / 3000 W / roz. 120 A / lad. 50 A / SOC 30%</text>
+    <text x="32" y="758">23:00-00:00</text><text x="250" y="758">nie</text><text x="520" y="758">Zero Export / 0 W / roz. 0 A / lad. 0 A / SOC 30%</text>
+  </g>
+  <g>
+    <rect class="panel" x="16" y="802" width="900" height="150" rx="7"/><rect class="head" x="16" y="802" width="900" height="36"/><text class="title" x="32" y="827">Ladowanie z sieci Deye</text>
+    <text class="small" x="32" y="866">Slot</text><text class="small" x="150" y="866">Od</text><text class="small" x="282" y="866">Do</text><text class="small" x="420" y="866">Batt</text><text class="small" x="570" y="866">Prad</text><text class="small" x="720" y="866">Siec</text>
+    <text class="text" x="32" y="900">1</text><text class="text" x="150" y="900">00:00</text><text class="text" x="282" y="900">05:45</text><text class="text" x="420" y="900">20%</text><text class="text" x="570" y="900">20 A</text><text class="text" x="720" y="900">nie</text>
+    <text class="text" x="32" y="930">6</text><text class="text" x="150" y="930">22:05</text><text class="text" x="282" y="930">00:00</text><text class="text" x="420" y="930">40%</text><text class="text" x="570" y="930">30 A</text><text class="good" x="720" y="930">tak</text>
+    <rect class="panel" x="936" y="802" width="548" height="150" rx="7"/><rect class="head" x="936" y="802" width="548" height="36"/><text class="title" x="952" y="827">Statystyki sprzedazy</text>
+    <text class="small" x="952" y="868">Dzisiaj energia</text><text class="good" x="952" y="890">4.823 kWh</text>
+    <text class="small" x="1120" y="868">Dzisiaj wartosc</text><text class="good" x="1120" y="890">3.42 PLN</text>
+    <text class="small" x="1290" y="868">Tydzien</text><text class="good" x="1290" y="890">31.2 kWh</text>
+    <rect x="952" y="914" width="18" height="18" fill="#35ff8d"/><rect x="980" y="902" width="18" height="30" fill="#35ff8d"/><rect x="1008" y="880" width="18" height="52" fill="#ffd166"/><rect x="1036" y="896" width="18" height="36" fill="#35ff8d"/><rect x="1064" y="918" width="18" height="14" fill="#35ff8d"/>
+  </g>
+</svg>

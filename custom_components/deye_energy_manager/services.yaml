@@ -1,0 +1,124 @@
+apply_settings:
+  name: Apply settings
+  description: Apply Deye work mode, max sell power, battery discharge current and optional charge current.
+  fields:
+    mode:
+      required: true
+      selector:
+        select:
+          options:
+            - Selling First
+            - Zero Export To Load
+            - Zero Export To CT
+    sell_power:
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 13000
+          step: 100
+          unit_of_measurement: W
+    discharge_current:
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 240
+          step: 5
+          unit_of_measurement: A
+    charge_current:
+      required: false
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 240
+          step: 5
+          unit_of_measurement: A
+manual_sell:
+  name: Manual sell
+  description: Switch to Selling First and set manual export limits.
+  fields:
+    sell_power:
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 13000
+          step: 100
+          unit_of_measurement: W
+    discharge_current:
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 240
+          step: 5
+          unit_of_measurement: A
+charge_now:
+  name: Charge now
+  description: Start battery charging by setting the configured charge current.
+  fields:
+    charge_current:
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 240
+          step: 5
+          unit_of_measurement: A
+stop_selling:
+  name: Stop selling
+  description: Switch to Zero Export To Load and set export/discharge limits to 0.
+restore_defaults:
+  name: Restore defaults
+  description: Restore safe default values.
+emergency_stop:
+  name: Emergency stop
+  description: Immediately stop selling.
+rate_ai_analysis:
+  name: Oceń sugestię AI
+  description: Zapisuje ocenę wybranej sugestii AI.
+  fields:
+    timestamp:
+      required: true
+      selector:
+        number:
+    rating:
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 5
+          step: 1
+clear_history:
+  name: Wyczyść historię i dane
+  description: Usuwa historię sugestii, uczenia i porównań Solcast.
+set_slot_grid_charge:
+  name: Ustaw ładowanie z sieci dla slotu
+  description: Włącza lub wyłącza ładowanie z sieci dla wybranej godziny harmonogramu 24h.
+  fields:
+    slot_key:
+      required: true
+      selector:
+        text:
+    enabled:
+      required: true
+      selector:
+        boolean:
+    grid_charge_current:
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 240
+          step: 5
+          unit_of_measurement: A
+    min_soc:
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 1
+          unit_of_measurement: "%"

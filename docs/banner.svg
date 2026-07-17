@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 420" role="img" aria-label="Deye Energy Manager">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#07131d"/>
+      <stop offset="0.55" stop-color="#11385a"/>
+      <stop offset="1" stop-color="#10b7c7"/>
+    </linearGradient>
+    <linearGradient id="bolt" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fff275"/>
+      <stop offset="1" stop-color="#ffd000"/>
+    </linearGradient>
+    <style>
+      .title{fill:#fff;font:800 64px Arial, sans-serif}
+      .sub{fill:#d7f8ff;font:500 26px Arial, sans-serif}
+      .small{fill:#93dcea;font:700 20px Arial, sans-serif}
+      .badge{fill:rgba(255,255,255,.12);stroke:rgba(255,255,255,.28)}
+      .badgeText{fill:#fff;font:700 17px Arial, sans-serif}
+    </style>
+  </defs>
+  <rect width="1280" height="420" rx="28" fill="url(#bg)"/>
+  <path d="M0 318 C190 276 320 355 505 314 C710 268 862 336 1280 285 L1280 420 L0 420 Z" fill="rgba(0,0,0,.18)"/>
+  <g transform="translate(92 96)">
+    <rect x="0" y="0" width="160" height="160" rx="34" fill="#0aa9bd"/>
+    <circle cx="48" cy="46" r="28" fill="#ff5b57"/>
+    <rect x="34" y="82" width="82" height="58" fill="none" stroke="#eafcff" stroke-width="10"/>
+    <path d="M71 82 L71 140 M34 111 L116 111" stroke="#eafcff" stroke-width="4" opacity=".55"/>
+    <rect x="104" y="62" width="72" height="84" fill="none" stroke="#eafcff" stroke-width="10"/>
+    <rect x="126" y="102" width="42" height="30" fill="#35ff8d"/>
+    <path d="M104 18 L80 92 L118 92 L88 160 L158 68 L118 68 Z" fill="url(#bolt)"/>
+  </g>
+  <text class="title" x="300" y="158">Deye Energy Manager</text>
+  <text class="sub" x="304" y="205">Home Assistant / HACS dla sterowania sprzedaza energii i magazynem</text>
+  <text class="small" x="304" y="246">harmonogram 24h · ceny Pstryk · Deye Grid Charge · sugestie AI</text>
+  <g transform="translate(304 292)">
+    <rect class="badge" x="0" y="0" width="130" height="36" rx="18"/>
+    <text class="badgeText" x="65" y="24" text-anchor="middle">HACS Custom</text>
+    <rect class="badge" x="146" y="0" width="108" height="36" rx="18"/>
+    <text class="badgeText" x="200" y="24" text-anchor="middle">MIT</text>
+    <rect class="badge" x="270" y="0" width="134" height="36" rx="18"/>
+    <text class="badgeText" x="337" y="24" text-anchor="middle">v0.7.5</text>
+    <rect class="badge" x="420" y="0" width="176" height="36" rx="18"/>
+    <text class="badgeText" x="508" y="24" text-anchor="middle">buycoffee.to</text>
+  </g>
+</svg>
