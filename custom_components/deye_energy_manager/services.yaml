@@ -28,7 +28,7 @@ apply_settings:
           unit_of_measurement: A
     charge_current:
       required: false
-      default: 0
+      description: Po pominięciu używany jest prąd zapisany w Ustawieniach domyślnych.
       selector:
         number:
           min: 0
@@ -69,13 +69,13 @@ charge_now:
           unit_of_measurement: A
 stop_selling:
   name: Stop selling
-  description: Switch to Zero Export To Load and set export/discharge limits to 0.
+  description: Zatrzaśnij sterowanie managera, zastosuj 1:1 pełny zestaw z Ustawień domyślnych i nie zeruj automatycznie wartości liczbowych.
 restore_defaults:
   name: Restore defaults
-  description: Restore safe default values.
+  description: Ręcznie zastosuj ustawienia zapisane przez użytkownika w oknie Ustawienia domyślne.
 emergency_stop:
   name: Emergency stop
-  description: Immediately stop selling.
+  description: Natychmiast zatrzaśnij sterowanie managera i zastosuj 1:1 pełny zestaw ustawień domyślnych użytkownika, włącznie z wybranym trybem.
 rate_ai_analysis:
   name: Oceń sugestię AI
   description: Zapisuje ocenę wybranej sugestii AI.

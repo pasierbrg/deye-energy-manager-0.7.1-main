@@ -3,49 +3,96 @@
   "config": {
     "step": {
       "user": {
-        "title": "Deye Energy Manager",
-        "description": "Wybierz encje Deye/ESPHome i Pstryk używane do sterowania falownikiem.",
+        "title": "Sposób mapowania",
+        "description": "Wybierz automatyczne podpowiedzi albo ręczne mapowanie. Automat tylko proponuje encje — przed zapisaniem zobaczysz i zatwierdzisz każdy wybór.",
+        "data": {"name": "Nazwa integracji", "mapping_mode": "Sposób wyboru encji"}
+      },
+      "inverter": {
+        "title": "1 z 5 — Falownik Deye i przepływy energii",
+        "description": "Wskaż encje sterujące oraz pomiary. Pola trybu pracy, mocy sprzedaży, prądu rozładowania i SOC są wymagane dla bezpiecznego działania.",
         "data": {
-          "name": "Nazwa",
           "work_mode_select": "Tryb pracy falownika",
           "max_sell_power_number": "Maksymalna moc sprzedaży",
           "discharge_current_number": "Maksymalny prąd rozładowania",
-          "charge_current_number": "Maksymalny prąd ładowania",
+          "charge_current_number": "Maksymalny prąd ładowania baterii",
           "grid_charge_current_number": "Maksymalny prąd ładowania z sieci",
-          "battery_soc_sensor": "Sensor SOC baterii",
-          "price_sensor": "Sensor ceny sprzedaży dziś",
-          "sell_price_tomorrow_sensor": "Sensor ceny sprzedaży jutro",
-          "buy_price_today_sensor": "Sensor ceny zakupu dziś",
-          "buy_price_tomorrow_sensor": "Sensor ceny zakupu jutro",
-          "grid_power_sensor": "Sensor mocy sieci",
-          "pv_power_sensor": "Sensor mocy PV",
-          "load_power_sensor": "Sensor mocy domu",
-          "battery_power_sensor": "Sensor mocy baterii",
-          "solcast_current_power_sensor": "Solcast: aktualna moc",
-          "solcast_forecast_today_sensor": "Solcast: prognoza na dziś",
-          "solcast_forecast_tomorrow_sensor": "Solcast: prognoza na jutro",
-          "solcast_forecast_day_3_sensor": "Solcast: prognoza dzień 3",
-          "solcast_forecast_day_4_sensor": "Solcast: prognoza dzień 4",
-          "solcast_forecast_day_5_sensor": "Solcast: prognoza dzień 5",
-          "solcast_forecast_day_6_sensor": "Solcast: prognoza dzień 6",
-          "solcast_forecast_day_7_sensor": "Solcast: prognoza dzień 7",
-          "solcast_remaining_today_sensor": "Solcast: pozostała prognoza na dziś",
-          "solcast_peak_power_today_sensor": "Solcast: szczytowa moc dzisiaj",
-          "solcast_peak_time_today_sensor": "Solcast: czas szczytowej mocy dzisiaj",
-          "daily_pv_production_sensor": "Dzienna produkcja PV"
+          "battery_soc_sensor": "Poziom naładowania baterii (SOC)",
+          "grid_power_sensor": "Moc pobierana/oddawana do sieci",
+          "pv_power_sensor": "Bieżąca moc instalacji PV",
+          "load_power_sensor": "Bieżące zużycie domu",
+          "battery_power_sensor": "Moc ładowania/rozładowania baterii",
+          "daily_pv_production_sensor": "Energia wyprodukowana przez PV dzisiaj"
+        },
+        "data_description": {
+          "work_mode_select": "Encja select pozwalająca wybrać np. Zero Export To Load lub Selling First.",
+          "grid_power_sensor": "Znak przepływu ustawisz na następnym ekranie.",
+          "battery_power_sensor": "Znak ładowania/rozładowania ustawisz na następnym ekranie."
         }
+      },
+      "prices": {
+        "title": "2 z 5 — Ceny, operator OSD i taryfa",
+        "description": "Wybierz źródło cen oraz profil dystrybucyjny. Podaj własne aktualne stawki z umowy — integracja nie zakłada jednej stawki dla całego operatora.",
+        "data": {
+          "price_source": "Źródło cen energii",
+          "price_sensor": "Cena sprzedaży dzisiaj",
+          "sell_price_tomorrow_sensor": "Cena sprzedaży jutro",
+          "buy_price_today_sensor": "Cena zakupu dzisiaj",
+          "buy_price_tomorrow_sensor": "Cena zakupu jutro",
+          "osd_provider": "Operator systemu dystrybucyjnego (OSD)",
+          "tariff_plan": "Taryfa dystrybucyjna",
+          "distribution_peak_rate": "Stawka dystrybucji — strefa szczytowa [PLN/kWh]",
+          "distribution_offpeak_rate": "Stawka dystrybucji — strefa tania [PLN/kWh]",
+          "custom_offpeak_windows": "Własne tanie godziny",
+          "grid_positive_is_import": "Dodatnia moc sieci oznacza pobór",
+          "battery_positive_is_discharge": "Dodatnia moc baterii oznacza rozładowanie"
+        },
+        "data_description": {
+          "custom_offpeak_windows": "Format: 13:00-15:00,22:00-06:00. Używany dla profilu własnego.",
+          "distribution_peak_rate": "Wpisz bieżącą zmienną stawkę dystrybucji ze swojej umowy.",
+          "distribution_offpeak_rate": "Wpisz bieżącą stawkę dla tańszej strefy."
+        }
+      },
+      "solcast": {
+        "title": "3 z 5 — Prognoza produkcji Solcast",
+        "description": "Wskaż encje Solcast. Prognoza na dziś i rzeczywista produkcja służą do obliczania trafności dopiero po zakończeniu dnia.",
+        "data": {
+          "solcast_current_power_sensor": "Solcast — aktualna moc",
+          "solcast_forecast_today_sensor": "Solcast — prognoza na dziś",
+          "solcast_forecast_tomorrow_sensor": "Solcast — prognoza na jutro",
+          "solcast_forecast_day_3_sensor": "Solcast — prognoza na dzień 3",
+          "solcast_forecast_day_4_sensor": "Solcast — prognoza na dzień 4",
+          "solcast_forecast_day_5_sensor": "Solcast — prognoza na dzień 5",
+          "solcast_forecast_day_6_sensor": "Solcast — prognoza na dzień 6",
+          "solcast_forecast_day_7_sensor": "Solcast — prognoza na dzień 7",
+          "solcast_remaining_today_sensor": "Solcast — pozostała prognoza na dziś",
+          "solcast_peak_power_today_sensor": "Solcast — szczytowa moc dzisiaj",
+          "solcast_peak_time_today_sensor": "Solcast — czas szczytowej mocy dzisiaj"
+        }
+      },
+      "weather": {
+        "title": "4 z 5 — Lokalna prognoza pogody",
+        "description": "Pogoda jest pomocniczym sygnałem ryzyka dla Solcast. Nie zastępuje prognozy PV i nie zwiększa jej samodzielnie.",
+        "data": {"weather_entity": "Encja lokalnej prognozy pogody"},
+        "data_description": {"weather_entity": "Domyślna propozycja: weather.forecast_home_2. Możesz wskazać dowolną encję weather.* z prognozą godzinową."}
+      },
+      "summary": {
+        "title": "5 z 5 — Test i zatwierdzenie",
+        "description": "Zmapowano: {mapped}. Brakujące wymagane pola: {missing}. Sprawdź poprzednie ekrany i zatwierdź konfigurację.",
+        "data": {"confirm": "Potwierdzam mapowanie i ustawienia"}
       }
     },
-    "abort": {
-      "already_configured": "Deye Energy Manager jest już skonfigurowany."
-    }
+    "error": {"required_entity_missing": "Co najmniej jedna wymagana encja nie istnieje albo jest niedostępna. Wróć do kroku Deye i popraw mapowanie."},
+    "abort": {"already_configured": "Deye Energy Manager jest już skonfigurowany."}
   },
   "options": {
     "step": {
-      "init": {
-        "title": "Mapowanie encji",
-        "description": "Zmień encje używane przez Deye Energy Manager. Integracja zostanie automatycznie przeładowana."
-      }
-    }
+      "init": {"title": "Mapowanie encji", "description": "Wybierz sposób ponownego mapowania. Zmiany zostaną zapisane dopiero po ostatnim potwierdzeniu.", "data": {"mapping_mode": "Sposób wyboru encji"}},
+      "inverter": {"title": "1 z 5 — Falownik Deye i przepływy energii", "description": "Sprawdź encje sterujące oraz pomiary.", "data": {"work_mode_select": "Tryb pracy falownika", "max_sell_power_number": "Maksymalna moc sprzedaży", "discharge_current_number": "Maksymalny prąd rozładowania", "charge_current_number": "Maksymalny prąd ładowania baterii", "grid_charge_current_number": "Maksymalny prąd ładowania z sieci", "battery_soc_sensor": "Poziom naładowania baterii (SOC)", "grid_power_sensor": "Moc sieci", "pv_power_sensor": "Moc PV", "load_power_sensor": "Zużycie domu", "battery_power_sensor": "Moc baterii", "daily_pv_production_sensor": "Produkcja PV dzisiaj"}},
+      "prices": {"title": "2 z 5 — Ceny, operator OSD i taryfa", "description": "Sprawdź źródła cen, operatora, taryfę, stawki i znaki przepływu.", "data": {"price_source": "Źródło cen energii", "price_sensor": "Cena sprzedaży dzisiaj", "sell_price_tomorrow_sensor": "Cena sprzedaży jutro", "buy_price_today_sensor": "Cena zakupu dzisiaj", "buy_price_tomorrow_sensor": "Cena zakupu jutro", "osd_provider": "Operator OSD", "tariff_plan": "Taryfa", "distribution_peak_rate": "Stawka szczytowa [PLN/kWh]", "distribution_offpeak_rate": "Stawka tania [PLN/kWh]", "custom_offpeak_windows": "Własne tanie godziny", "grid_positive_is_import": "Dodatnia moc sieci oznacza pobór", "battery_positive_is_discharge": "Dodatnia moc baterii oznacza rozładowanie"}},
+      "solcast": {"title": "3 z 5 — Prognoza Solcast", "description": "Sprawdź encje prognozy PV.", "data": {"solcast_current_power_sensor": "Aktualna moc", "solcast_forecast_today_sensor": "Prognoza na dziś", "solcast_forecast_tomorrow_sensor": "Prognoza na jutro", "solcast_forecast_day_3_sensor": "Prognoza dzień 3", "solcast_forecast_day_4_sensor": "Prognoza dzień 4", "solcast_forecast_day_5_sensor": "Prognoza dzień 5", "solcast_forecast_day_6_sensor": "Prognoza dzień 6", "solcast_forecast_day_7_sensor": "Prognoza dzień 7", "solcast_remaining_today_sensor": "Pozostała prognoza na dziś", "solcast_peak_power_today_sensor": "Szczytowa moc dzisiaj", "solcast_peak_time_today_sensor": "Czas szczytowej mocy"}},
+      "weather": {"title": "4 z 5 — Lokalna pogoda", "description": "Wybierz pomocniczą prognozę godzinową.", "data": {"weather_entity": "Encja weather.*"}},
+      "summary": {"title": "5 z 5 — Test i zatwierdzenie", "description": "Zmapowano: {mapped}. Brakujące wymagane pola: {missing}.", "data": {"confirm": "Potwierdzam zmiany"}}
+    },
+    "error": {"required_entity_missing": "Wymagana encja jest niedostępna. Wróć i popraw mapowanie."}
   }
 }

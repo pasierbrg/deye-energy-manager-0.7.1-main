@@ -17,7 +17,7 @@ APPLY_SCHEMA = vol.Schema(
         vol.Required("mode"): vol.In(WORK_MODES),
         vol.Required("sell_power"): vol.All(vol.Coerce(float), vol.Range(min=0, max=13000)),
         vol.Required("discharge_current"): vol.All(vol.Coerce(float), vol.Range(min=0, max=240)),
-        vol.Optional("charge_current", default=0): vol.All(vol.Coerce(float), vol.Range(min=0, max=240)),
+        vol.Optional("charge_current"): vol.All(vol.Coerce(float), vol.Range(min=0, max=240)),
     }
 )
 MANUAL_SELL_SCHEMA = vol.Schema(
@@ -91,7 +91,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             call.data["mode"],
             call.data["sell_power"],
             call.data["discharge_current"],
-            call.data["charge_current"],
+            call.data.get("charge_current", runtime.default_charge_current),
         )
 
     async def handle_manual_sell(call: ServiceCall) -> None:

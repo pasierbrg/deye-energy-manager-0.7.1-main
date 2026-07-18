@@ -11,10 +11,10 @@ Deye Energy Manager jest niestandardową integracją Home Assistant dla falownik
 
 ## Wersja 0.7.6
 
-Wersja 0.7.6 koncentruje się na bezpieczeństwie i niezawodności sterowania:
+Wersja 0.7.6 koncentruje się na bezpieczeństwie, jakości danych i wygodniejszej konfiguracji:
 
-- brak poprawnego odczytu SOC blokuje sprzedaż zamiast przyjmować 100%;
-- zapisy wielopolowe są serializowane i wykonywane przez bezpieczny tryb bez eksportu;
+- brak poprawnego odczytu SOC uruchamia powrót 1:1 do pełnych „Ustawień domyślnych” zamiast przyjmować 100%;
+- zapisy wielopolowe są serializowane; wartości liczbowe są zapisywane i potwierdzane przed ustawieniem wybranego trybu docelowego;
 - harmonogram przekraczający 6 fizycznych zakresów Deye jest odrzucany przed aktywnym sterowaniem;
 - karta stosuje operacje zbiorcze i sugestie przez jedną transakcyjną usługę backendu;
 - dodano walidację trybów, mocy, prądów, SOC i cen;
@@ -22,6 +22,14 @@ Wersja 0.7.6 koncentruje się na bezpieczeństwie i niezawodności sterowania:
 - dodano edycję mapowania encji w opcjach integracji;
 - sensory PV, domu i baterii można mapować bez zmiany kodu;
 - bieżący dzień pokazuje realizację prognozy, a nie przedwczesną „trafność”;
+- trafność historyczna korzysta wyłącznie z zakończonych dni, pokazuje liczbę próbek oraz ograniczoną korektę historyczną;
+- dodano pomocniczą prognozę `weather.*` (domyślnie `weather.forecast_home_2`), która ocenia ryzyko pogodowe, ale nie zastępuje Solcast;
+- próbki energii są zapisywane co 5 minut; surowe dane są przechowywane 90 dni, dane godzinowe 24 miesiące, dzienne 5 lat, a miesięczne bez automatycznego usuwania;
+- dodano operatorów PGE, Tauron, Enea, Energa, Stoen i profil własny oraz taryfy G11, G12, G12w, G12e i własne godziny;
+- koszt dystrybucji jest doliczany przy wyborze najtańszych godzin ładowania, z obsługą weekendów i polskich świąt;
+- odczyty mocy, SOC i cen aktualizują sensory managera zdarzeniowo, bez oczekiwania na minutowy cykl sterownika;
+- kreator mapowania został podzielony na Deye, ceny/OSD, Solcast, pogodę oraz końcowy test;
+- automatyczne mapowanie wyłącznie podpowiada encje i zawsze wymaga zatwierdzenia użytkownika;
 - poprawiono bezpieczeństwo HTML, widoki mobilne i przewijanie okien;
 - dodano testy regresji najważniejszych reguł bezpieczeństwa.
 
@@ -35,6 +43,8 @@ Pełna lista znajduje się w [CHANGELOG.md](CHANGELOG.md).
 - minimalny SOC i minimalna cena sprzedaży dla każdego slotu;
 - ręczne i zbiorcze edytowanie harmonogramu;
 - inteligentne sugestie bazujące na cenach, prognozie PV i historii;
+- profile dystrybucyjne OSD i taryfy G11/G12/G12w/G12e;
+- wspomaganie prognozy przez lokalną encję pogodową;
 - statystyki sprzedaży, produkcji, zużycia i pracy baterii;
 - diagnostyka wymaganych encji;
 - eksport historii i kopii konfiguracji.
@@ -72,6 +82,21 @@ Opcjonalnie można skonfigurować sensory:
 - dziennej produkcji PV;
 - cen sprzedaży i zakupu Pstryk;
 - prognozy oraz aktualnej mocy Solcast.
+- lokalnej prognozy godzinowej `weather.*`.
+
+## Dane, trafność i uczenie
+
+- **Realizacja dzisiaj** informuje, jaka część dzisiejszej prognozy została już wyprodukowana. Nie jest to ocena trafności.
+- **Trafność historyczna** jest średnią z zamkniętych dni: `100% - bezwzględny błąd procentowy`.
+- **Korekta historyczna** porównuje rzeczywistą produkcję z Solcast. Dla bezpieczeństwa pojedyncze współczynniki są ograniczone do zakresu `0,50–1,50`.
+- Brakujące i niedostępne odczyty są oznaczane jako braki danych, a nie zapisywane jako sztuczne zera.
+- Pogoda jest sygnałem pomocniczym. Solcast pozostaje głównym źródłem prognozy PV.
+
+## Taryfy i dystrybucja
+
+W kreatorze można wybrać operatora OSD, taryfę i własne aktualne stawki dystrybucji. Profile godzinowe są wartościami startowymi — dokładne godziny i stawki należy zawsze porównać z obowiązującą umową oraz taryfą operatora. Dla taryfy G12w weekendy i polskie dni ustawowo wolne są traktowane jako tania strefa.
+
+W ustawieniach karty znajduje się zakładka **Taryfa i dystrybucja** z bieżącą strefą oraz profilem 24-godzinnym.
 
 Po instalacji mapowanie można zmienić przez **Ustawienia → Urządzenia i usługi → Deye Energy Manager → Konfiguruj**.
 
@@ -115,11 +140,15 @@ Przykład kompletnego dashboardu znajduje się w `dashboard/energy_manager.yaml`
 
 ## Zasady bezpieczeństwa
 
-- Przy aktywnej ochronie SOC brak poprawnego odczytu baterii blokuje sprzedaż.
-- Przy aktywnej ochronie ceny brak poprawnej ceny blokuje sprzedaż.
-- Aktualizacja ustawień sprzedaży najpierw przełącza falownik w `Zero Export To Load`.
+- Przy aktywnej ochronie SOC brak poprawnego odczytu baterii uruchamia powrót 1:1 do pełnych **Ustawień domyślnych**.
+- Przy aktywnej ochronie ceny brak poprawnej ceny uruchamia powrót 1:1 do pełnych **Ustawień domyślnych**.
+- Aktualizacja ustawień zapisuje i potwierdza wartości liczbowe przed ustawieniem docelowego trybu falownika; integracja nie zastępuje wybranego trybu innym.
 - Mapowanie ponad 6 zakresów nie jest zapisywane do Deye.
-- Zatrzymanie awaryjne ustawia tryb bez eksportu, zeruje limity i pozostaje zatrzymane po skasowaniu alarmu — ponowne uruchomienie wymaga świadomej zmiany trybu.
+- Ustawienia zapisane w oknie **Ustawienia domyślne** są stanem powrotu po zatrzymaniu lub błędzie.
+- Stop Sell, zatrzymanie awaryjne oraz błędy SOC, ceny, mapowania i zapisu stosują 1:1 domyślny tryb, domyślną moc oraz trzy domyślne prądy użytkownika. Integracja nie zapisuje automatycznie wartości `0`, chyba że użytkownik sam zapisał ją jako domyślną.
+- Integracja zachowuje `Zero Export To CT`, `Zero Export To Load` albo `Selling First` dokładnie zgodnie z wyborem użytkownika i nie odgaduje topologii instalacji.
+- Stop Sell i zatrzymanie awaryjne zatrzaskują sterowanie managera do świadomego wznowienia oraz stosują pełny zestaw ustawień domyślnych użytkownika.
+- Ustawienia można ręcznie przywrócić przyciskiem **Zastosuj ustawienia domyślne teraz**.
 
 Integracja steruje fizycznym urządzeniem. Pierwszą konfigurację należy obserwować w Home Assistant i aplikacji falownika, używając konserwatywnych limitów mocy i prądu.
 

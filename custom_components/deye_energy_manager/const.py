@@ -27,6 +27,16 @@ CONF_SOLCAST_REMAINING_TODAY_SENSOR = "solcast_remaining_today_sensor"
 CONF_SOLCAST_PEAK_POWER_TODAY_SENSOR = "solcast_peak_power_today_sensor"
 CONF_SOLCAST_PEAK_TIME_TODAY_SENSOR = "solcast_peak_time_today_sensor"
 CONF_DAILY_PV_PRODUCTION_SENSOR = "daily_pv_production_sensor"
+CONF_WEATHER_ENTITY = "weather_entity"
+CONF_PRICE_SOURCE = "price_source"
+CONF_OSD_PROVIDER = "osd_provider"
+CONF_TARIFF_PLAN = "tariff_plan"
+CONF_DISTRIBUTION_PEAK_RATE = "distribution_peak_rate"
+CONF_DISTRIBUTION_OFFPEAK_RATE = "distribution_offpeak_rate"
+CONF_CUSTOM_OFFPEAK_WINDOWS = "custom_offpeak_windows"
+CONF_GRID_POSITIVE_IS_IMPORT = "grid_positive_is_import"
+CONF_BATTERY_POSITIVE_IS_DISCHARGE = "battery_positive_is_discharge"
+CONF_MAPPING_MODE = "mapping_mode"
 
 DEFAULT_WORK_MODE_SELECT = "select.deye_inverter_system_work_mode"
 DEFAULT_MAX_SELL_POWER = "number.deye_inverter_max_sell_power"
@@ -54,6 +64,20 @@ DEFAULT_SOLCAST_REMAINING_TODAY_SENSOR = "sensor.solcast_pv_forecast_pozostala_p
 DEFAULT_SOLCAST_PEAK_POWER_TODAY_SENSOR = "sensor.solcast_pv_forecast_szczytowa_moc_dzisiaj"
 DEFAULT_SOLCAST_PEAK_TIME_TODAY_SENSOR = "sensor.solcast_pv_forecast_czas_szczytowej_mocy_dzisiaj"
 DEFAULT_DAILY_PV_PRODUCTION_SENSOR = "sensor.deye_inverter_daily_pv_production"
+DEFAULT_WEATHER_ENTITY = "weather.forecast_home_2"
+DEFAULT_PRICE_SOURCE = "pstryk"
+DEFAULT_OSD_PROVIDER = "pge"
+DEFAULT_TARIFF_PLAN = "g11"
+DEFAULT_DISTRIBUTION_PEAK_RATE = 0.0
+DEFAULT_DISTRIBUTION_OFFPEAK_RATE = 0.0
+DEFAULT_CUSTOM_OFFPEAK_WINDOWS = "13:00-15:00,22:00-06:00"
+DEFAULT_GRID_POSITIVE_IS_IMPORT = True
+DEFAULT_BATTERY_POSITIVE_IS_DISCHARGE = True
+DEFAULT_MAPPING_MODE = "automatic"
+
+PRICE_SOURCES = ["pstryk", "pse_rce", "other", "none"]
+OSD_PROVIDERS = ["pge", "tauron", "enea", "energa", "stoen", "other"]
+TARIFF_PLANS = ["g11", "g12", "g12w", "g12e", "custom"]
 
 MODE_SELLING_FIRST = "Selling First"
 MODE_ZERO_EXPORT = "Zero Export To Load"

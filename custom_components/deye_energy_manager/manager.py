@@ -13,12 +13,14 @@ from homeassistant.util.dt import now as ha_now
 
 from .const import (
     CONF_BATTERY_SOC_SENSOR,
+    CONF_BATTERY_POSITIVE_IS_DISCHARGE,
     CONF_BUY_PRICE_TODAY_SENSOR,
     CONF_BUY_PRICE_TOMORROW_SENSOR,
     CONF_CHARGE_CURRENT_NUMBER,
     CONF_DAILY_PV_PRODUCTION_SENSOR,
     CONF_GRID_CHARGE_CURRENT_NUMBER,
     CONF_GRID_POWER_SENSOR,
+    CONF_GRID_POSITIVE_IS_IMPORT,
     CONF_PV_POWER_SENSOR,
     CONF_LOAD_POWER_SENSOR,
     CONF_BATTERY_POWER_SENSOR,
@@ -38,6 +40,13 @@ from .const import (
     CONF_SOLCAST_PEAK_TIME_TODAY_SENSOR,
     CONF_SOLCAST_REMAINING_TODAY_SENSOR,
     CONF_WORK_MODE_SELECT,
+    CONF_WEATHER_ENTITY,
+    CONF_PRICE_SOURCE,
+    CONF_OSD_PROVIDER,
+    CONF_TARIFF_PLAN,
+    CONF_DISTRIBUTION_PEAK_RATE,
+    CONF_DISTRIBUTION_OFFPEAK_RATE,
+    CONF_CUSTOM_OFFPEAK_WINDOWS,
     CONTROL_MODES,
     DOMAIN,
     MODE_SELLING_FIRST,
@@ -69,7 +78,17 @@ from .const import (
     DEFAULT_SOLCAST_PEAK_POWER_TODAY_SENSOR,
     DEFAULT_SOLCAST_PEAK_TIME_TODAY_SENSOR,
     DEFAULT_SOLCAST_REMAINING_TODAY_SENSOR,
+    DEFAULT_WEATHER_ENTITY,
+    DEFAULT_PRICE_SOURCE,
+    DEFAULT_OSD_PROVIDER,
+    DEFAULT_TARIFF_PLAN,
+    DEFAULT_DISTRIBUTION_PEAK_RATE,
+    DEFAULT_DISTRIBUTION_OFFPEAK_RATE,
+    DEFAULT_CUSTOM_OFFPEAK_WINDOWS,
+    DEFAULT_GRID_POSITIVE_IS_IMPORT,
+    DEFAULT_BATTERY_POSITIVE_IS_DISCHARGE,
 )
+from .tariffs import PROVIDER_LABELS, TARIFF_LABELS, hourly_tariff_profile, tariff_zone
 
 
 @dataclass
@@ -118,6 +137,7 @@ class DeyeEnergyManagerRuntime:
     _ai_store: Store | None = None
     _solcast_store: Store | None = None
     _learning_store: Store | None = None
+    _samples_store: Store | None = None
     _stats_dirty: bool = False
     sales_stats: dict[str, Any] = field(default_factory=dict)
     ai_settings: dict[str, Any] = field(default_factory=dict)
@@ -126,6 +146,12 @@ class DeyeEnergyManagerRuntime:
     solcast_tracking: dict[str, Any] = field(default_factory=dict)
     learning_history: list[dict[str, Any]] = field(default_factory=list)
     learning_tracking: dict[str, Any] = field(default_factory=dict)
+    energy_samples: list[dict[str, Any]] = field(default_factory=list)
+    daily_archive: list[dict[str, Any]] = field(default_factory=list)
+    monthly_archive: list[dict[str, Any]] = field(default_factory=list)
+    weather_forecast: list[dict[str, Any]] = field(default_factory=list)
+    weather_last_updated: str = ""
+    _last_energy_sample_at: datetime | None = None
     slots: dict[str, SlotSettings] = field(default_factory=dict)
     last_action: str = "Idle"
     last_applied_at: str = ""
@@ -281,6 +307,87 @@ class DeyeEnergyManagerRuntime:
     def solcast_peak_time_today_sensor(self) -> str | None:
         return self.configured_sensor(CONF_SOLCAST_PEAK_TIME_TODAY_SENSOR, DEFAULT_SOLCAST_PEAK_TIME_TODAY_SENSOR)
 
+    @property
+    def weather_entity(self) -> str | None:
+        return self.data.get(CONF_WEATHER_ENTITY) or DEFAULT_WEATHER_ENTITY
+
+    @property
+    def osd_provider(self) -> str:
+        return str(self.data.get(CONF_OSD_PROVIDER, DEFAULT_OSD_PROVIDER)).lower()
+
+    @property
+    def tariff_plan(self) -> str:
+        return str(self.data.get(CONF_TARIFF_PLAN, DEFAULT_TARIFF_PLAN)).lower()
+
+    @property
+    def price_source(self) -> str:
+        return str(self.data.get(CONF_PRICE_SOURCE, DEFAULT_PRICE_SOURCE)).lower()
+
+    @property
+    def distribution_peak_rate(self) -> float:
+        return max(0.0, self.safe_float(self.data.get(CONF_DISTRIBUTION_PEAK_RATE), DEFAULT_DISTRIBUTION_PEAK_RATE))
+
+    @property
+    def distribution_offpeak_rate(self) -> float:
+        return max(0.0, self.safe_float(self.data.get(CONF_DISTRIBUTION_OFFPEAK_RATE), DEFAULT_DISTRIBUTION_OFFPEAK_RATE))
+
+    @property
+    def custom_offpeak_windows(self) -> str:
+        return str(self.data.get(CONF_CUSTOM_OFFPEAK_WINDOWS, DEFAULT_CUSTOM_OFFPEAK_WINDOWS))
+
+    def normalized_grid_power(self) -> float:
+        value = self.state_float(self.grid_power_sensor, 0)
+        return value if bool(self.data.get(CONF_GRID_POSITIVE_IS_IMPORT, DEFAULT_GRID_POSITIVE_IS_IMPORT)) else -value
+
+    def normalized_battery_power(self) -> float:
+        value = self.state_float(self.battery_power_sensor, 0)
+        return value if bool(self.data.get(CONF_BATTERY_POSITIVE_IS_DISCHARGE, DEFAULT_BATTERY_POSITIVE_IS_DISCHARGE)) else -value
+
+    def tariff_context(self, moment: datetime | None = None) -> dict[str, Any]:
+        current = moment or ha_now()
+        profile = hourly_tariff_profile(
+            current,
+            self.tariff_plan,
+            self.distribution_peak_rate,
+            self.distribution_offpeak_rate,
+            self.custom_offpeak_windows,
+            self.osd_provider,
+        )
+        zone = tariff_zone(current, self.tariff_plan, self.custom_offpeak_windows, self.osd_provider)
+        current_row = profile[current.hour]
+        return {
+            "provider": self.osd_provider,
+            "provider_name": PROVIDER_LABELS.get(self.osd_provider, self.osd_provider),
+            "plan": self.tariff_plan,
+            "plan_name": TARIFF_LABELS.get(self.tariff_plan, self.tariff_plan.upper()),
+            "zone": zone,
+            "season": current_row.get("season"),
+            "distribution_rate": current_row["rate"],
+            "peak_rate": self.distribution_peak_rate,
+            "offpeak_rate": self.distribution_offpeak_rate,
+            "custom_offpeak_windows": self.custom_offpeak_windows,
+            "hourly_profile": profile,
+        }
+
+    def weather_context(self) -> dict[str, Any]:
+        state = self.hass.states.get(self.weather_entity) if self.weather_entity else None
+        attrs = dict(state.attributes) if state is not None else {}
+        cloud = self.safe_float(attrs.get("cloud_coverage"), 0)
+        precipitation = self.safe_float(attrs.get("precipitation_probability"), 0)
+        # Weather is a conservative auxiliary signal. Solcast remains the primary forecast.
+        risk_factor = max(0.75, min(1.0, 1.0 - cloud * 0.0015 - precipitation * 0.001))
+        return {
+            "entity_id": self.weather_entity,
+            "available": state is not None and state.state not in ("unknown", "unavailable"),
+            "condition": state.state if state is not None else "unavailable",
+            "temperature": attrs.get("temperature"),
+            "cloud_coverage": attrs.get("cloud_coverage"),
+            "precipitation_probability": attrs.get("precipitation_probability"),
+            "risk_factor": round(risk_factor, 3),
+            "forecast": self.weather_forecast[:24],
+            "last_updated": self.weather_last_updated,
+        }
+
     def register_entity(self, entity: Any) -> None:
         self.entities.append(entity)
 
@@ -404,6 +511,7 @@ class DeyeEnergyManagerRuntime:
             self.pv_power_sensor,
             self.load_power_sensor,
             self.battery_power_sensor,
+            self.weather_entity,
         ]
         entities = []
         for entity_id in entity_ids:
@@ -425,6 +533,9 @@ class DeyeEnergyManagerRuntime:
             "mapping_segments": len(self._compress_schedule_segments()),
             "active_slot": self.active_slot_key(),
             "next_active_slot": self.next_active_slot,
+            "energy_samples": len(self.energy_samples),
+            "weather": self.weather_context(),
+            "tariff": self.tariff_context(),
         }
 
     def empty_hourly_stats(self) -> dict[str, dict[str, float]]:
@@ -527,9 +638,13 @@ class DeyeEnergyManagerRuntime:
         self.solcast_tracking = {}
         self.learning_history = []
         self.learning_tracking = {}
+        self.energy_samples = []
+        self.daily_archive = []
+        self.monthly_archive = []
         await self.async_save_ai_data()
         await self.async_save_solcast_history()
         await self.async_save_learning_history()
+        await self.async_save_energy_history()
         self.notify_update()
 
     async def async_load_solcast_history(self) -> None:
@@ -538,13 +653,13 @@ class DeyeEnergyManagerRuntime:
         data = raw if isinstance(raw, dict) else {}
         history = data.get("history")
         tracking = data.get("tracking")
-        self.solcast_history = history[:90] if isinstance(history, list) else []
+        self.solcast_history = history[:1825] if isinstance(history, list) else []
         self.solcast_tracking = tracking if isinstance(tracking, dict) else {}
 
     async def async_save_solcast_history(self) -> None:
         if self._solcast_store is None:
             return
-        await self._solcast_store.async_save({"history": self.solcast_history[:90], "tracking": self.solcast_tracking})
+        await self._solcast_store.async_save({"history": self.solcast_history[:1825], "tracking": self.solcast_tracking})
 
     async def async_update_solcast_history(self) -> None:
         now = ha_now()
@@ -577,7 +692,8 @@ class DeyeEnergyManagerRuntime:
                 "error_kwh": round(error, 3),
                 "error_percent": round(error_percent, 1),
                 "accuracy_percent": round(accuracy, 1),
-            }, *[row for row in self.solcast_history if row.get("date") != tracked_day]][:90]
+                "day_complete": True,
+            }, *[row for row in self.solcast_history if row.get("date") != tracked_day]][:1825]
             await self.async_add_ai_analysis({
                 "timestamp": int(now.timestamp() * 1000),
                 "event": "daily_summary",
@@ -602,16 +718,154 @@ class DeyeEnergyManagerRuntime:
         data = raw if isinstance(raw, dict) else {}
         history = data.get("history")
         tracking = data.get("tracking")
-        self.learning_history = history[:2160] if isinstance(history, list) else []
+        self.learning_history = history[:17520] if isinstance(history, list) else []
         self.learning_tracking = tracking if isinstance(tracking, dict) else {}
 
     async def async_save_learning_history(self) -> None:
         if self._learning_store is None:
             return
         await self._learning_store.async_save({
-            "history": self.learning_history[:2160],
+            "history": self.learning_history[:17520],
             "tracking": self.learning_tracking,
         })
+
+    async def async_load_energy_history(self) -> None:
+        self._samples_store = Store(self.hass, 1, f"{DOMAIN}_{self.entry_id}_energy_samples")
+        raw = await self._samples_store.async_load()
+        data = raw if isinstance(raw, dict) else {}
+        self.energy_samples = data.get("samples", []) if isinstance(data.get("samples"), list) else []
+        self.daily_archive = data.get("daily", []) if isinstance(data.get("daily"), list) else []
+        self.monthly_archive = data.get("monthly", []) if isinstance(data.get("monthly"), list) else []
+        last = data.get("last_sample")
+        try:
+            self._last_energy_sample_at = datetime.fromisoformat(str(last)) if last else None
+        except (TypeError, ValueError):
+            self._last_energy_sample_at = None
+
+    async def async_save_energy_history(self) -> None:
+        if self._samples_store is None:
+            return
+        await self._samples_store.async_save({
+            "samples": self.energy_samples,
+            "daily": self.daily_archive,
+            "monthly": self.monthly_archive,
+            "last_sample": self._last_energy_sample_at.isoformat() if self._last_energy_sample_at else None,
+        })
+
+    def _archive_energy_samples(self, now: datetime) -> None:
+        cutoff = now - timedelta(days=90)
+        old = []
+        retained = []
+        for sample in self.energy_samples:
+            try:
+                stamp = datetime.fromisoformat(str(sample.get("timestamp")))
+                is_old = stamp < cutoff
+            except (TypeError, ValueError):
+                continue
+            (old if is_old else retained).append(sample)
+        self.energy_samples = retained
+        if not old:
+            return
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for sample in old:
+            grouped.setdefault(str(sample.get("timestamp"))[:10], []).append(sample)
+        existing = {str(row.get("date")): row for row in self.daily_archive}
+        for day, samples in grouped.items():
+            row: dict[str, Any] = {"date": day, "samples": len(samples)}
+            for key in ("pv_power", "load_power", "grid_power", "battery_power", "soc", "sell_price", "buy_price"):
+                values = [self.safe_float(item.get(key), 0) for item in samples if item.get(key) is not None]
+                row[f"{key}_avg"] = round(sum(values) / len(values), 3) if values else None
+            sample_hours = 5 / 60
+            row["pv_kwh"] = round(sum(max(0, self.safe_float(item.get("pv_power"), 0)) for item in samples) / 1000 * sample_hours, 3)
+            row["load_kwh"] = round(sum(max(0, self.safe_float(item.get("load_power"), 0)) for item in samples) / 1000 * sample_hours, 3)
+            row["grid_import_kwh"] = round(sum(max(0, self.safe_float(item.get("grid_power"), 0)) for item in samples) / 1000 * sample_hours, 3)
+            row["grid_export_kwh"] = round(sum(max(0, -self.safe_float(item.get("grid_power"), 0)) for item in samples) / 1000 * sample_hours, 3)
+            row["battery_charge_kwh"] = round(sum(max(0, -self.safe_float(item.get("battery_power"), 0)) for item in samples) / 1000 * sample_hours, 3)
+            row["battery_discharge_kwh"] = round(sum(max(0, self.safe_float(item.get("battery_power"), 0)) for item in samples) / 1000 * sample_hours, 3)
+            existing[day] = row
+        daily_cutoff = (now - timedelta(days=1825)).date().isoformat()
+        expired_daily = [row for day, row in existing.items() if day < daily_cutoff]
+        self.daily_archive = sorted(
+            (row for day, row in existing.items() if day >= daily_cutoff),
+            key=lambda row: str(row.get("date")),
+            reverse=True,
+        )
+        months: dict[str, list[dict[str, Any]]] = {}
+        for row in self.daily_archive:
+            months.setdefault(str(row.get("date"))[:7], []).append(row)
+        energy_keys = ("pv_kwh", "load_kwh", "grid_import_kwh", "grid_export_kwh", "battery_charge_kwh", "battery_discharge_kwh")
+        def month_row(month: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+            return {
+                "month": month,
+                "days": len(rows),
+                "samples": sum(int(row.get("samples", 0)) for row in rows),
+                **{key: round(sum(self.safe_float(row.get(key), 0) for row in rows), 3) for key in energy_keys},
+            }
+        retained_months = [month_row(month, rows) for month, rows in sorted(months.items(), reverse=True)]
+        permanent = {
+            str(row.get("month")): row
+            for row in self.monthly_archive
+            if str(row.get("month")) < daily_cutoff[:7]
+        }
+        expired_months: dict[str, list[dict[str, Any]]] = {}
+        for row in expired_daily:
+            expired_months.setdefault(str(row.get("date"))[:7], []).append(row)
+        for month, rows in expired_months.items():
+            permanent[month] = month_row(month, rows)
+        self.monthly_archive = sorted([*retained_months, *permanent.values()], key=lambda row: str(row.get("month")), reverse=True)
+
+    async def async_update_energy_sample(self) -> None:
+        now = ha_now()
+        if self._last_energy_sample_at:
+            try:
+                if (now - self._last_energy_sample_at).total_seconds() < 285:
+                    return
+            except TypeError:
+                self._last_energy_sample_at = None
+        fields = {
+            "pv_power": self.state_float_or_none(self.pv_power_sensor),
+            "load_power": self.state_float_or_none(self.load_power_sensor),
+            "grid_power": self.normalized_grid_power() if self.entity_available(self.grid_power_sensor) else None,
+            "battery_power": self.normalized_battery_power() if self.entity_available(self.battery_power_sensor) else None,
+            "soc": self.state_float_or_none(self.battery_soc_sensor),
+            "sell_price": self.state_float_or_none(self.price_sensor),
+            "buy_price": self.state_float_or_none(self.buy_price_today_sensor),
+            "daily_pv": self.state_float_or_none(self.daily_pv_production_sensor),
+        }
+        sample = {
+            "timestamp": now.replace(second=0, microsecond=0).isoformat(),
+            **fields,
+            "missing": [key for key, value in fields.items() if value is None],
+        }
+        self.energy_samples.append(sample)
+        self._last_energy_sample_at = now
+        self._archive_energy_samples(now)
+        await self.async_save_energy_history()
+
+    async def async_update_weather_forecast(self) -> None:
+        entity_id = self.weather_entity
+        if not entity_id or not self.entity_available(entity_id):
+            self.weather_forecast = []
+            self.weather_last_updated = ha_now().isoformat(timespec="seconds")
+            return
+        try:
+            response = await self.hass.services.async_call(
+                "weather",
+                "get_forecasts",
+                {"type": "hourly"},
+                target={"entity_id": entity_id},
+                blocking=True,
+                return_response=True,
+            )
+            payload = response.get(entity_id, response) if isinstance(response, dict) else {}
+            forecast = payload.get("forecast", []) if isinstance(payload, dict) else []
+            self.weather_forecast = forecast[:48] if isinstance(forecast, list) else []
+        except Exception:  # Weather is optional and must never block inverter safety logic.
+            # Older HA versions or test doubles may not expose response-enabled services.
+            state = self.hass.states.get(entity_id)
+            forecast = state.attributes.get("forecast", []) if state is not None else []
+            self.weather_forecast = forecast[:48] if isinstance(forecast, list) else []
+        self.weather_last_updated = ha_now().isoformat(timespec="seconds")
 
     def _new_learning_hour(self, hour_key: str, now: datetime) -> dict[str, Any]:
         return {
@@ -662,7 +916,7 @@ class DeyeEnergyManagerRuntime:
                 self.learning_history = [
                     completed,
                     *[row for row in self.learning_history if row.get("hour") != completed["hour"]],
-                ][:2160]
+                ][:17520]
             self.learning_tracking = self._new_learning_hour(hour_key, now)
 
         tracking = self.learning_tracking
@@ -675,8 +929,8 @@ class DeyeEnergyManagerRuntime:
 
         pv_power = self.state_float(self.pv_power_sensor, 0)
         load_power = self.state_float(self.load_power_sensor, 0)
-        grid_power = self.state_float(self.grid_power_sensor, 0)
-        battery_power = self.state_float(self.battery_power_sensor, 0)
+        grid_power = self.normalized_grid_power()
+        battery_power = self.normalized_battery_power()
         soc = self.state_float(self.battery_soc_sensor, 0)
         sell_price = self.state_float(self.price_sensor, 0)
         buy_price = self.state_float(self.buy_price_today_sensor, 0)
@@ -721,18 +975,35 @@ class DeyeEnergyManagerRuntime:
                 "sell_price_avg": round(sum(self.safe_float(row.get("sell_price_avg"), 0) for row in matches) / count, 3),
                 "buy_price_avg": round(sum(self.safe_float(row.get("buy_price_avg"), 0) for row in matches) / count, 3),
             })
-        accuracy_rows = [self.safe_float(row.get("accuracy_percent"), 0) for row in self.solcast_history if row.get("accuracy_percent") is not None]
-        correction_rows = [
-            self.safe_float(row.get("actual_kwh"), 0) / self.safe_float(row.get("forecast_kwh"), 1)
-            for row in self.solcast_history
-            if self.safe_float(row.get("forecast_kwh"), 0) > 0
+        completed_rows = [
+            row for row in self.solcast_history
+            if row.get("accuracy_percent") is not None
+            and self.safe_float(row.get("forecast_kwh"), 0) > 0
+            and row.get("day_complete", True)
         ]
+        accuracy_rows = [self.safe_float(row.get("accuracy_percent"), 0) for row in completed_rows]
+        correction_rows = [
+            max(0.5, min(1.5, self.safe_float(row.get("actual_kwh"), 0) / self.safe_float(row.get("forecast_kwh"), 1)))
+            for row in completed_rows
+        ]
+        current_forecast = self.safe_float(self.solcast_tracking.get("forecast"), 0)
+        current_actual = self.safe_float(self.solcast_tracking.get("actual"), 0)
+        current_progress = min(100.0, current_actual / current_forecast * 100) if current_forecast > 0 else None
+        latest = completed_rows[0] if completed_rows else {}
         return {
-            "retention_days": 90,
+            "retention_days": 730,
+            "retention": {"raw_5_min_days": 90, "hourly_months": 24, "daily_years": 5, "monthly_limit": None},
+            "raw_samples": len(self.energy_samples),
+            "daily_archive_rows": len(self.daily_archive),
+            "monthly_archive_rows": len(self.monthly_archive),
             "recorded_days": len(dates),
             "recorded_hours": len(rows),
             "solcast_accuracy_avg": round(sum(accuracy_rows) / len(accuracy_rows), 1) if accuracy_rows else None,
             "solcast_correction_factor": round(sum(correction_rows) / len(correction_rows), 3) if correction_rows else None,
+            "solcast_accuracy_days": len(accuracy_rows),
+            "solcast_last_accuracy": latest.get("accuracy_percent"),
+            "solcast_last_date": latest.get("date"),
+            "current_forecast_progress": round(current_progress, 1) if current_progress is not None else None,
             "typical_daily_pv_kwh": round(sum(row["pv_kwh"] for row in per_hour), 2),
             "typical_daily_load_kwh": round(sum(row["load_kwh"] for row in per_hour), 2),
             "typical_daily_grid_export_kwh": round(sum(row["grid_export_kwh"] for row in per_hour), 2),
@@ -748,7 +1019,10 @@ class DeyeEnergyManagerRuntime:
                 "solcast": self.solcast_forecast_today_sensor,
                 "sell_price": self.price_sensor,
                 "buy_price": self.buy_price_today_sensor,
+                "weather": self.weather_entity,
             },
+            "weather": self.weather_context(),
+            "tariff": self.tariff_context(),
             "hourly_profile": per_hour,
         }
 
@@ -786,9 +1060,13 @@ class DeyeEnergyManagerRuntime:
                 "forecast_progress_percent": min(100, actual / forecast * 100) if forecast > 0 else None,
                 "day_complete": False,
             })
+        for row in self.daily_archive:
+            day = str(row.get("date") or "")
+            if day:
+                grouped.setdefault(day, dict(row))
         return [
             {key: round(value, 3) if isinstance(value, float) else value for key, value in row.items()}
-            for _day, row in sorted(grouped.items(), reverse=True)[:120]
+            for _day, row in sorted(grouped.items(), reverse=True)[:1825]
         ]
 
     def history_monthly_summary(self) -> list[dict[str, Any]]:
@@ -801,9 +1079,13 @@ class DeyeEnergyManagerRuntime:
             item["days"] += 1
             for key in ("pv_kwh", "load_kwh", "grid_import_kwh", "grid_export_kwh", "battery_charge_kwh", "battery_discharge_kwh", "sold_kwh", "sold_value", "forecast_kwh", "actual_kwh"):
                 item[key] = self.safe_float(item.get(key), 0) + self.safe_float(row.get(key), 0)
+        for row in self.monthly_archive:
+            month = str(row.get("month") or "")
+            if month and month not in grouped:
+                grouped[month] = dict(row)
         return [
             {key: round(value, 3) if isinstance(value, float) else value for key, value in row.items()}
-            for _month, row in sorted(grouped.items(), reverse=True)[:24]
+            for _month, row in sorted(grouped.items(), reverse=True)
         ]
 
     def safe_float(self, value: Any, default: float = 0) -> float:
@@ -851,7 +1133,7 @@ class DeyeEnergyManagerRuntime:
             value = sum(self.safe_float(values.get("value"), 0) for values in self.sales_stats.get("hourly", {}).values())
             daily = self.sales_stats.setdefault("daily", {})
             daily[previous_day] = {"kwh": round(kwh, 4), "value": round(value, 4)}
-            for old_day in sorted(daily)[:-370]:
+            for old_day in sorted(daily)[:-1825]:
                 daily.pop(old_day, None)
 
         self.sales_stats["current_day"] = day
@@ -933,7 +1215,7 @@ class DeyeEnergyManagerRuntime:
         delta_seconds = min(delta_seconds, 300)
         delta_hours = delta_seconds / 3600
         self._energy_last_update = current
-        grid_power = self.state_float(self.grid_power_sensor, 0)
+        grid_power = self.normalized_grid_power()
         exported_power_w = max(0, -grid_power)
         if exported_power_w > 0 and delta_hours > 0:
             kwh = (exported_power_w / 1000) * delta_hours
@@ -1015,11 +1297,11 @@ class DeyeEnergyManagerRuntime:
         if self.control_mode == "Manual Sell":
             return self.manual_sell_power
         if self.control_mode != "Schedule":
-            return 0
+            return self.default_sell_power
         if self.active_slot.enabled and not self.price_ok:
             return self.default_sell_power
         if self.active_slot.enabled and (self.active_slot.mode == MODE_CHARGE or self.active_slot.charge_enabled):
-            return 0
+            return self.default_sell_power
         return self.active_slot.sell_power if self.active_slot.enabled else self.default_sell_power
 
     @property
@@ -1027,11 +1309,11 @@ class DeyeEnergyManagerRuntime:
         if self.control_mode == "Manual Sell":
             return self.manual_discharge_current
         if self.control_mode != "Schedule":
-            return 0
+            return self.default_discharge_current
         if self.active_slot.enabled and not self.price_ok:
             return self.default_discharge_current
         if self.active_slot.enabled and (self.active_slot.mode == MODE_CHARGE or self.active_slot.charge_enabled):
-            return 0
+            return self.default_discharge_current
         return self.active_slot.discharge_current if self.active_slot.enabled else self.default_discharge_current
 
     @property
@@ -1041,10 +1323,12 @@ class DeyeEnergyManagerRuntime:
         if self.control_mode == "Schedule" and self.active_slot.enabled and not self.price_ok:
             return self.default_charge_current
         if self.control_mode == "Schedule" and self.active_slot.enabled:
-            return self.active_slot.charge_current
-        if self.control_mode == "Schedule":
-            return self.default_charge_current
-        return 0
+            return (
+                self.active_slot.charge_current
+                if self.active_slot.charge_current > 0
+                else self.default_charge_current
+            )
+        return self.default_charge_current
 
     @property
     def manager_status(self) -> str:
@@ -1101,6 +1385,150 @@ class DeyeEnergyManagerRuntime:
         if entity_id:
             time_value = value if len(value) == 8 else f"{value}:00"
             await self.hass.services.async_call("time", "set_value", {"entity_id": entity_id, "time": time_value}, blocking=True)
+
+    def _validate_control_plan(
+        self,
+        mode: str,
+        sell_power: float,
+        discharge_current: float,
+        charge_current: float,
+        grid_charge_current: float,
+    ) -> None:
+        """Reject an invalid control plan before the first write to Deye."""
+        if mode not in WORK_MODES:
+            raise ValueError(f"Unsupported Deye work mode: {mode}")
+        values = {
+            "Max Sell Power": (sell_power, 0.0, 13000.0),
+            "Maximum Battery Discharge Current": (discharge_current, 0.0, 240.0),
+            "Maximum Battery Charge Current": (charge_current, 0.0, 240.0),
+            "Maximum Battery Grid Charge Current": (grid_charge_current, 0.0, 240.0),
+        }
+        for label, (raw_value, minimum, maximum) in values.items():
+            value = float(raw_value)
+            if not math.isfinite(value) or not minimum <= value <= maximum:
+                raise ValueError(f"{label} must be between {minimum:g} and {maximum:g}")
+        required_entities = {
+            "System Work Mode": self.work_mode_select,
+            "Max Sell Power": self.max_sell_power_number,
+            "Maximum Battery Discharge Current": self.discharge_current_number,
+        }
+        for label, entity_id in required_entities.items():
+            if not entity_id or self.hass.states.get(entity_id) is None:
+                raise ValueError(f"Missing required Deye entity: {label}")
+
+    async def async_verify_control_values(
+        self,
+        mode: str | None,
+        sell_power: float,
+        discharge_current: float,
+        charge_current: float,
+        grid_charge_current: float,
+    ) -> list[str]:
+        """Return Deye values that could not be confirmed after a blocking write."""
+        expected_numbers = {
+            self.max_sell_power_number: ("Max Sell Power", float(sell_power)),
+            self.discharge_current_number: ("Maximum Battery Discharge Current", float(discharge_current)),
+        }
+        if self.charge_current_number:
+            expected_numbers[self.charge_current_number] = (
+                "Maximum Battery Charge Current",
+                float(charge_current),
+            )
+        if self.grid_charge_current_number:
+            expected_numbers[self.grid_charge_current_number] = (
+                "Maximum Battery Grid Charge Current",
+                float(grid_charge_current),
+            )
+
+        unconfirmed: list[str] = []
+        for attempt in range(3):
+            unconfirmed = []
+            if mode is not None:
+                mode_state = self.hass.states.get(self.work_mode_select)
+                if mode_state is None or str(mode_state.state) != mode:
+                    actual_mode = "brak" if mode_state is None else str(mode_state.state)
+                    unconfirmed.append(f"System Work Mode={actual_mode} (oczekiwano {mode})")
+            for entity_id, (label, expected) in expected_numbers.items():
+                state = self.hass.states.get(entity_id)
+                actual = None if state is None else self.safe_float(state.state, float("nan"))
+                if actual is None or not math.isfinite(actual) or not math.isclose(actual, expected, abs_tol=0.1):
+                    actual_label = "brak" if actual is None or not math.isfinite(actual) else f"{actual:g}"
+                    unconfirmed.append(f"{label}={actual_label} (oczekiwano {expected:g})")
+            if not unconfirmed:
+                return []
+            if attempt < 2:
+                await asyncio.sleep(0.1 * (attempt + 1))
+        return unconfirmed
+
+    async def async_apply_safe_defaults(self, reason: str) -> bool:
+        """Apply user defaults as the single fail-safe path without forced zeroes."""
+        mode = self.default_work_mode
+        failures: list[str] = []
+        try:
+            self._validate_control_plan(
+                mode,
+                self.default_sell_power,
+                self.default_discharge_current,
+                self.default_charge_current,
+                self.default_grid_charge_current,
+            )
+        except Exception as err:
+            failures.append(str(err))
+
+        operations = (
+            ("Max Sell Power", self.async_set_number, (self.max_sell_power_number, self.default_sell_power)),
+            (
+                "Maximum Battery Discharge Current",
+                self.async_set_number,
+                (self.discharge_current_number, self.default_discharge_current),
+            ),
+            (
+                "Maximum Battery Charge Current",
+                self.async_set_number,
+                (self.charge_current_number, self.default_charge_current),
+            ),
+            (
+                "Maximum Battery Grid Charge Current",
+                self.async_set_number,
+                (self.grid_charge_current_number, self.default_grid_charge_current),
+            ),
+            ("System Work Mode", self.async_set_work_mode, (mode,)),
+        )
+        if not failures:
+            for label, writer, args in operations:
+                try:
+                    await writer(*args)
+                except Exception as err:
+                    failures.append(f"{label}: {err}")
+
+        if not failures:
+            failures.extend(
+                await self.async_verify_control_values(
+                    mode,
+                    self.default_sell_power,
+                    self.default_discharge_current,
+                    self.default_charge_current,
+                    self.default_grid_charge_current,
+                )
+            )
+
+        if failures:
+            try:
+                await self.async_set_work_mode(self.default_work_mode)
+            except Exception as err:
+                failures.append(f"System Work Mode: {err}")
+            self.last_action = "Nie udało się w pełni zastosować ustawień domyślnych — sprawdź falownik."
+            self.last_error = (
+                f"KRYTYCZNY błąd częściowego zapisu ({reason}). "
+                f"Niepotwierdzone wartości: {'; '.join(failures)}"
+            )
+            self.notify_update()
+            return False
+
+        self.last_action = f"{reason}. Zastosowano ustawienia domyślne."
+        self.last_error = self.last_action
+        self.notify_update()
+        return True
 
     def _tou_entity(self, idx: int, kind: str) -> str:
         if kind == "start":
@@ -1205,24 +1633,32 @@ class DeyeEnergyManagerRuntime:
         if slot_key not in self.slots:
             return False
         self._last_tou_signature = ""
-        if not await self.async_apply_time_of_use_map():
-            return False
-        slot = self.slots[slot_key]
-        if slot.enabled and (slot.mode == MODE_CHARGE or slot.charge_enabled):
-            current = slot.grid_charge_current if slot.grid_charge_current > 0 else self.default_grid_charge_current
-            await self.async_set_switch("switch.deye_inverter_time_of_use", True)
-            await self.async_set_number(self.grid_charge_current_number, current)
-            if slot_key == self.active_slot_key():
-                await self.async_set_work_mode(MODE_ZERO_EXPORT)
-                await self.async_set_number(self.charge_current_number, slot.charge_current)
-                self.last_action = (
-                    f"Ładowanie z sieci {slot.label}: {current:g} A, "
-                    f"SOC {slot.min_soc:g}%"
+        try:
+            if self.mapping_error:
+                raise ValueError(
+                    f"Mapowanie wymaga {len(self._compress_schedule_segments())} zakresów; "
+                    "Deye obsługuje maksymalnie 6"
                 )
-        self.last_error = ""
-        self.mark_settings_applied()
-        self.notify_update()
-        return True
+            if not await self.async_apply_time_of_use_map():
+                raise RuntimeError(self.last_error or "Błąd zapisu Deye Time Of Use")
+            slot = self.slots[slot_key]
+            if slot.enabled and (slot.mode == MODE_CHARGE or slot.charge_enabled):
+                current = slot.grid_charge_current if slot.grid_charge_current > 0 else self.default_grid_charge_current
+                await self.async_set_switch("switch.deye_inverter_time_of_use", True)
+                await self.async_set_number(self.grid_charge_current_number, current)
+                if slot_key == self.active_slot_key():
+                    await self.async_set_number(self.charge_current_number, slot.charge_current)
+                    self.last_action = (
+                        f"Ładowanie z sieci {slot.label}: {current:g} A, "
+                        f"SOC {slot.min_soc:g}%"
+                    )
+            self.last_error = ""
+            self.mark_settings_applied()
+            self.notify_update()
+            return True
+        except Exception as err:
+            await self.async_apply_safe_defaults(f"Błąd zapisu ładowania z sieci: {err}")
+            return False
 
     async def async_apply_schedule_patch(self, updates: list[dict[str, Any]]) -> None:
         """Validate and apply a group of logical slot changes as one operation."""
@@ -1287,13 +1723,15 @@ class DeyeEnergyManagerRuntime:
                         f"Mapowanie wymaga {len(self._compress_schedule_segments())} zakresów; "
                         "Deye obsługuje maksymalnie 6"
                     )
+                applied = await self._async_tick_impl()
+                if not applied:
+                    raise RuntimeError(self.last_error or "Nie udało się zastosować harmonogramu")
                 self.mark_config_saved()
-                await self._async_tick_impl()
-            except Exception:
+            except Exception as err:
                 self.slots = previous_slots
                 self.scheduler_enabled = previous_scheduler
                 self.charge_scheduler_enabled = previous_charge_scheduler
-                await self.async_stop_selling("Schedule update failed - safe mode")
+                await self.async_apply_safe_defaults(f"Błąd zapisu harmonogramu: {err}")
                 self.notify_update()
                 raise
 
@@ -1307,28 +1745,61 @@ class DeyeEnergyManagerRuntime:
         """Apply direct inverter settings using a safe, serialized write order."""
         async with self._operation_lock:
             if mode == MODE_SELLING_FIRST and not self.sell_allowed:
-                await self.async_stop_selling("Direct sell blocked by safety guard")
+                await self.async_apply_safe_defaults("Sprzedaż zablokowana przez ochronę SOC lub ceny")
                 raise ValueError(self.decision_reason)
-            await self.async_set_work_mode(MODE_ZERO_EXPORT)
-            await self.async_set_number(self.max_sell_power_number, 0)
-            await self.async_set_number(self.discharge_current_number, 0)
-            await self.async_set_number(self.charge_current_number, charge_current)
-            await self.async_set_number(self.max_sell_power_number, sell_power)
-            await self.async_set_number(self.discharge_current_number, discharge_current)
-            await self.async_set_work_mode(mode)
-            self.last_action = "Service apply_settings"
+            try:
+                self._validate_control_plan(
+                    mode,
+                    sell_power,
+                    discharge_current,
+                    charge_current,
+                    self.default_grid_charge_current,
+                )
+            except Exception as err:
+                await self.async_apply_safe_defaults(f"Nieprawidłowy plan ustawień: {err}")
+                raise
+            try:
+                await self.async_set_number(self.charge_current_number, charge_current)
+                await self.async_set_number(
+                    self.grid_charge_current_number,
+                    self.default_grid_charge_current,
+                )
+                await self.async_set_number(self.max_sell_power_number, sell_power)
+                await self.async_set_number(self.discharge_current_number, discharge_current)
+                unconfirmed = await self.async_verify_control_values(
+                    None,
+                    sell_power,
+                    discharge_current,
+                    charge_current,
+                    self.default_grid_charge_current,
+                )
+                if unconfirmed:
+                    raise RuntimeError(f"Niepotwierdzone wartości: {'; '.join(unconfirmed)}")
+                await self.async_set_work_mode(mode)
+                unconfirmed = await self.async_verify_control_values(
+                    mode,
+                    sell_power,
+                    discharge_current,
+                    charge_current,
+                    self.default_grid_charge_current,
+                )
+                if unconfirmed:
+                    raise RuntimeError(f"Niepotwierdzone wartości końcowe: {'; '.join(unconfirmed)}")
+            except Exception as err:
+                await self.async_apply_safe_defaults(f"Błąd bezpośredniego zapisu ustawień: {err}")
+                raise
+            self.last_action = "Zastosowano ustawienia bezpośrednie"
             self.last_error = ""
             self.mark_settings_applied()
             self.notify_update()
 
     async def async_apply_targets(self) -> bool:
         if self.control_mode == "Schedule" and self.mapping_error:
-            await self.async_stop_selling("Mapping error - safe defaults applied")
-            self.last_error = (
-                f"Mapowanie wymaga {len(self._compress_schedule_segments())} zakresów; "
+            reason = (
+                f"Błąd mapowania: wymagane {len(self._compress_schedule_segments())} zakresów, "
                 "Deye obsługuje maksymalnie 6"
             )
-            self.notify_update()
+            await self.async_apply_safe_defaults(reason)
             return False
 
         sell_requested = self.control_mode == "Manual Sell" or (
@@ -1347,43 +1818,68 @@ class DeyeEnergyManagerRuntime:
             )
         )
         if sell_requested and not self.sell_allowed:
-            if not self.price_ok:
-                await self.async_apply_default_values("Defaults applied by price guard")
-                return False
-            await self.async_stop_selling("Blocked by guard")
+            reason = "Błąd ceny" if not self.price_ok else "Błąd lub brak odczytu SOC"
+            await self.async_apply_safe_defaults(reason)
             return False
         if charge_requested and not self.charge_allowed:
-            await self.async_stop_selling("Charge blocked")
+            await self.async_apply_safe_defaults("Ładowanie zablokowane przez ochronę danych")
             return False
 
         target_mode = self.target_mode
         target_sell_power = self.target_sell_power
         target_discharge_current = self.target_discharge_current
         target_charge_current = self.target_charge_current
-
-        # Put the inverter in a non-exporting state while a multi-value update is applied.
-        await self.async_set_work_mode(MODE_ZERO_EXPORT)
-        await self.async_set_number(self.max_sell_power_number, 0)
-        await self.async_set_number(self.discharge_current_number, 0)
-
-        if self.control_mode == "Schedule" and not await self.async_apply_time_of_use_map():
-            self.last_action = "Mapping rejected - inverter kept in safe mode"
-            self.mark_settings_applied()
-            self.notify_update()
-            return False
-
-        await self.async_set_number(self.charge_current_number, target_charge_current)
+        grid_charge_current = self.default_grid_charge_current
         if self.active_slot.enabled and (self.active_slot.mode == MODE_CHARGE or self.active_slot.charge_enabled):
             grid_charge_current = (
                 self.active_slot.grid_charge_current
                 if self.active_slot.grid_charge_current > 0
                 else self.default_grid_charge_current
             )
-            await self.async_set_switch("switch.deye_inverter_time_of_use", True)
+
+        try:
+            self._validate_control_plan(
+                target_mode,
+                target_sell_power,
+                target_discharge_current,
+                target_charge_current,
+                grid_charge_current,
+            )
+        except Exception as err:
+            await self.async_apply_safe_defaults(f"Nieprawidłowy plan sterowania: {err}")
+            return False
+
+        try:
+            if self.control_mode == "Schedule" and not await self.async_apply_time_of_use_map():
+                raise RuntimeError(self.last_error or "Błąd zapisu mapowania TOU")
+            await self.async_set_number(self.charge_current_number, target_charge_current)
+            if self.active_slot.enabled and (self.active_slot.mode == MODE_CHARGE or self.active_slot.charge_enabled):
+                await self.async_set_switch("switch.deye_inverter_time_of_use", True)
             await self.async_set_number(self.grid_charge_current_number, grid_charge_current)
-        await self.async_set_number(self.max_sell_power_number, target_sell_power)
-        await self.async_set_number(self.discharge_current_number, target_discharge_current)
-        await self.async_set_work_mode(target_mode)
+            await self.async_set_number(self.max_sell_power_number, target_sell_power)
+            await self.async_set_number(self.discharge_current_number, target_discharge_current)
+            unconfirmed = await self.async_verify_control_values(
+                None,
+                target_sell_power,
+                target_discharge_current,
+                target_charge_current,
+                grid_charge_current,
+            )
+            if unconfirmed:
+                raise RuntimeError(f"Niepotwierdzone wartości: {'; '.join(unconfirmed)}")
+            await self.async_set_work_mode(target_mode)
+            unconfirmed = await self.async_verify_control_values(
+                target_mode,
+                target_sell_power,
+                target_discharge_current,
+                target_charge_current,
+                grid_charge_current,
+            )
+            if unconfirmed:
+                raise RuntimeError(f"Niepotwierdzone wartości końcowe: {'; '.join(unconfirmed)}")
+        except Exception as err:
+            await self.async_apply_safe_defaults(f"Nieudana transakcja sterująca: {err}")
+            return False
         self.last_action = f"Applied {self.control_mode}"
         self.last_error = ""
         self.mark_settings_applied()
@@ -1391,12 +1887,42 @@ class DeyeEnergyManagerRuntime:
         return True
 
     async def async_apply_default_values(self, reason: str = "Defaults applied") -> None:
-        await self.async_set_work_mode(self.default_work_mode)
-        await self.async_set_number(self.max_sell_power_number, self.default_sell_power)
-        await self.async_set_number(self.discharge_current_number, self.default_discharge_current)
-        await self.async_set_number(self.charge_current_number, self.default_charge_current)
-        await self.async_set_number(self.grid_charge_current_number, self.default_grid_charge_current)
+        self._validate_control_plan(
+            self.default_work_mode,
+            self.default_sell_power,
+            self.default_discharge_current,
+            self.default_charge_current,
+            self.default_grid_charge_current,
+        )
+        try:
+            await self.async_set_number(self.max_sell_power_number, self.default_sell_power)
+            await self.async_set_number(self.discharge_current_number, self.default_discharge_current)
+            await self.async_set_number(self.charge_current_number, self.default_charge_current)
+            await self.async_set_number(self.grid_charge_current_number, self.default_grid_charge_current)
+            unconfirmed = await self.async_verify_control_values(
+                None,
+                self.default_sell_power,
+                self.default_discharge_current,
+                self.default_charge_current,
+                self.default_grid_charge_current,
+            )
+            if unconfirmed:
+                raise RuntimeError(f"Niepotwierdzone ustawienia domyślne: {'; '.join(unconfirmed)}")
+            await self.async_set_work_mode(self.default_work_mode)
+            unconfirmed = await self.async_verify_control_values(
+                self.default_work_mode,
+                self.default_sell_power,
+                self.default_discharge_current,
+                self.default_charge_current,
+                self.default_grid_charge_current,
+            )
+            if unconfirmed:
+                raise RuntimeError(f"Niepotwierdzone ustawienia końcowe: {'; '.join(unconfirmed)}")
+        except Exception as err:
+            await self.async_apply_safe_defaults(f"Błąd ręcznego przywracania ustawień: {err}")
+            raise
         self.last_action = reason
+        self.last_error = ""
         self.mark_settings_applied()
         self.notify_update()
 
@@ -1409,67 +1935,75 @@ class DeyeEnergyManagerRuntime:
         await self.async_tick()
 
     async def async_stop_selling(self, reason: str = "Stopped") -> None:
-        await self.async_set_work_mode(MODE_ZERO_EXPORT)
-        await self.async_set_number(self.max_sell_power_number, 0)
-        await self.async_set_number(self.discharge_current_number, 0)
-        self.last_action = reason
-        self.mark_settings_applied()
-        self.notify_update()
+        await self.async_apply_safe_defaults(reason)
 
     async def async_request_stop(self) -> None:
-        self.control_mode = "Stop Sell"
-        await self.async_tick()
+        async with self._operation_lock:
+            self.control_mode = "Stop Sell"
+            await self.async_apply_safe_defaults("Sprzedaż zatrzymana")
 
     async def async_restore_defaults(self) -> None:
         async with self._operation_lock:
+            applied = await self.async_apply_safe_defaults(
+                "Ręczne zastosowanie ustawień domyślnych"
+            )
+            if not applied:
+                raise RuntimeError(
+                    self.last_error
+                    or "Nie udało się potwierdzić pełnego zestawu ustawień domyślnych"
+                )
             self.emergency_stop = False
             self.control_mode = "Schedule"
-            await self.async_apply_default_values("Defaults restored")
             self.scheduler_enabled = False
             self.charge_scheduler_enabled = False
+            self.last_action = "Zastosowano ustawienia domyślne"
+            self.last_error = ""
+            self.mark_settings_applied()
             self.notify_update()
 
     async def async_emergency_stop(self) -> None:
         async with self._operation_lock:
             self.emergency_stop = True
             self.control_mode = "Stop Sell"
-            await self.async_stop_selling("Emergency stop")
+            await self.async_apply_safe_defaults("Zatrzymanie awaryjne")
 
-    async def _async_tick_impl(self, *_args: Any) -> None:
+    async def _async_tick_impl(self, *_args: Any) -> bool:
         previous_sold_energy = self.sold_energy_today
         previous_sold_value = self.sold_value_today
         await self.async_update_sold_energy_today()
         await self.async_update_solcast_history()
         await self.async_update_learning_history()
+        await self.async_update_energy_sample()
+        if not self.weather_last_updated or ha_now().minute == 0:
+            await self.async_update_weather_forecast()
         if self.emergency_stop:
-            await self.async_stop_selling("Emergency stop")
+            return await self.async_apply_safe_defaults("Zatrzymanie awaryjne")
         elif self.control_mode == "Schedule" and self.mapping_error:
-            await self.async_stop_selling("Mapping error - safe mode")
-            self.last_error = (
-                f"Mapowanie wymaga {len(self._compress_schedule_segments())} zakresów; "
+            return await self.async_apply_safe_defaults(
+                f"Błąd mapowania: wymagane {len(self._compress_schedule_segments())} zakresów, "
                 "Deye obsługuje maksymalnie 6"
             )
         elif self.control_mode in ("Manual Sell", "Charge Battery"):
-            await self.async_apply_targets()
+            return await self.async_apply_targets()
         elif self.control_mode in ("Stop Sell", "Protect Battery"):
-            await self.async_stop_selling(self.control_mode)
+            return await self.async_apply_safe_defaults(
+                "Sprzedaż zatrzymana" if self.control_mode == "Stop Sell" else "Aktywna ochrona baterii"
+            )
         elif self.scheduler_enabled:
             if self.active_slot.enabled:
-                await self.async_apply_targets()
+                return await self.async_apply_targets()
             else:
                 await self.async_apply_default_values("Defaults applied by inactive slot")
         if self.sold_energy_today != previous_sold_energy or self.sold_value_today != previous_sold_value:
             self.notify_update()
+        return True
 
     async def async_tick(self, *_args: Any) -> None:
         async with self._operation_lock:
             try:
                 await self._async_tick_impl(*_args)
-                if not self.mapping_error:
-                    self.last_error = ""
             except Exception as err:
-                self.last_error = f"{type(err).__name__}: {err}"
-                self.notify_update()
+                await self.async_apply_safe_defaults(f"Nieudana transakcja sterująca: {type(err).__name__}: {err}")
                 raise
 
     async def async_start(self) -> None:
@@ -1479,6 +2013,9 @@ class DeyeEnergyManagerRuntime:
         await self.async_update_solcast_history()
         await self.async_load_learning_history()
         await self.async_update_learning_history()
+        await self.async_load_energy_history()
+        await self.async_update_energy_sample()
+        await self.async_update_weather_forecast()
         self.unsub_timer = async_track_time_interval(self.hass, self.async_tick, timedelta(minutes=1))
 
     async def async_unload(self) -> None:
@@ -1489,6 +2026,7 @@ class DeyeEnergyManagerRuntime:
         await self.async_save_ai_data()
         await self.async_save_solcast_history()
         await self.async_save_learning_history()
+        await self.async_save_energy_history()
 
     def set_control_mode(self, mode: str) -> None:
         if mode in CONTROL_MODES:
