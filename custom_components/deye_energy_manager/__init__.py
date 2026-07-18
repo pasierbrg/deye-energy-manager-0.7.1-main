@@ -51,6 +51,7 @@ SERVICE_NAMES = (
     "charge_now",
     "stop_selling",
     "restore_defaults",
+    "resume_manager",
     "emergency_stop",
     "save_ai_settings",
     "save_ai_analysis",
@@ -116,6 +117,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def handle_restore_defaults(call: ServiceCall) -> None:
         await runtime.async_restore_defaults()
 
+    async def handle_resume_manager(call: ServiceCall) -> None:
+        await runtime.async_resume_manager()
+
     async def handle_emergency_stop(call: ServiceCall) -> None:
         await runtime.async_emergency_stop()
 
@@ -178,6 +182,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.services.async_register(DOMAIN, "charge_now", handle_charge_now, schema=CHARGE_SCHEMA)
     hass.services.async_register(DOMAIN, "stop_selling", handle_stop_selling)
     hass.services.async_register(DOMAIN, "restore_defaults", handle_restore_defaults)
+    hass.services.async_register(DOMAIN, "resume_manager", handle_resume_manager)
     hass.services.async_register(DOMAIN, "emergency_stop", handle_emergency_stop)
     hass.services.async_register(DOMAIN, "save_ai_settings", handle_save_ai_settings, schema=AI_DATA_SCHEMA)
     hass.services.async_register(DOMAIN, "save_ai_analysis", handle_save_ai_analysis, schema=AI_DATA_SCHEMA)

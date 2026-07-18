@@ -27,6 +27,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             DeyeManagerButton(runtime, "charge_now", "Charge now", lambda r: r.async_charge_now()),
             DeyeManagerButton(runtime, "stop_selling", "Stop selling", lambda r: r.async_request_stop()),
             DeyeManagerButton(runtime, "restore_defaults", "Restore defaults", lambda r: r.async_restore_defaults()),
+            DeyeManagerButton(runtime, "resume_manager", "Resume manager and schedule", lambda r: r.async_resume_manager()),
             DeyeManagerButton(runtime, "emergency_stop", "Emergency stop", lambda r: r.async_emergency_stop()),
         ]
     )

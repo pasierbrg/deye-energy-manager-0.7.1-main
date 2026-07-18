@@ -83,6 +83,14 @@ class FrontendDefaultRestoreTests(unittest.TestCase):
         self.assertIn("return this.applyDefaultValues()", method)
         self.assertNotIn("callService", method)
 
+
+    def test_resume_manager_uses_dedicated_backend_service(self):
+        method = extract_method(self.sources[0], "async resumeManager()")
+        self.assertEqual(method.count("this.callService("), 1)
+        self.assertIn('this.callService("deye_energy_manager", "resume_manager", {})', method)
+        self.assertIn("data-resume-manager", self.sources[0])
+        self.assertIn("SCHEDULE APPLY ERROR", self.sources[0])
+
     def test_ai_dialog_contains_approved_navigation_and_controls(self):
         source = self.sources[0]
         for required in (
@@ -104,6 +112,8 @@ class FrontendDefaultRestoreTests(unittest.TestCase):
             "data-ai-chart-point",
             "data-ai-weather-mode",
             "aiReadableEnergyChart",
+            "aiReadableDayChart",
+            "ai-crisp-weather-grid",
             "data-ai-chart-series",
             "ai-readable-weather",
             "ai-status-sell",
@@ -116,8 +126,8 @@ class FrontendDefaultRestoreTests(unittest.TestCase):
     def test_documentation_uses_current_card_cache_revision(self):
         for name in ("README.md", "INSTALL_PL.md"):
             source = (ROOT / name).read_text(encoding="utf-8")
-            self.assertIn("deye-energy-manager-card.js?v=0765", source)
-            self.assertNotIn("deye-energy-manager-card.js?v=076\n", source)
+            self.assertIn("deye-energy-manager-card.js?v=0767", source)
+            self.assertNotIn("deye-energy-manager-card.js?v=0765", source)
 
 
 if __name__ == "__main__":

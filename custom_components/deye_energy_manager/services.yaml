@@ -73,6 +73,9 @@ stop_selling:
 restore_defaults:
   name: Restore defaults
   description: Ręcznie zastosuj ustawienia zapisane przez użytkownika w oknie Ustawienia domyślne.
+resume_manager:
+  name: Włącz Manager i harmonogram
+  description: Świadomie włącza tryb Schedule i przełącznik Scheduler po Stop Sell lub zatrzymaniu awaryjnym. Nie włącza osobnego harmonogramu ładowania z sieci.
 emergency_stop:
   name: Emergency stop
   description: Natychmiast zatrzaśnij sterowanie managera i zastosuj 1:1 pełny zestaw ustawień domyślnych użytkownika, włącznie z wybranym trybem.

@@ -91,6 +91,9 @@ class FakeServices:
         self.calls = []
         self.failures = []
 
+    def ignore_once(self, domain, service, *, entity_id=None, option=None):
+        self.failures.append({"domain": domain, "service": service, "entity_id": entity_id, "option": option, "remaining": 1, "ignore": True})
+
     def fail_once(self, domain, service, *, entity_id=None, option=None):
         self.failures.append(
             {
@@ -114,6 +117,8 @@ class FakeServices:
             if failure["option"] is not None and data.get("option") != failure["option"]:
                 continue
             failure["remaining"] -= 1
+            if failure.get("ignore"):
+                return
             raise RuntimeError(f"Injected {domain}.{service} failure")
 
         entity_id = data.get("entity_id")
@@ -150,6 +155,11 @@ def make_runtime(soc="50", price="0.50", default_mode=None):
         const.DEFAULT_CHARGE_CURRENT: FakeState("0"),
         const.DEFAULT_GRID_CHARGE_CURRENT: FakeState("0"),
     }
+    states["switch.deye_inverter_time_of_use"] = FakeState("off")
+    for idx in range(1, 7):
+        states[f"time.deye_inverter_time_of_use_{idx}_start"] = FakeState("00:00:00")
+        states[f"number.deye_inverter_time_of_use_{idx}_soc"] = FakeState("20")
+        states[f"switch.deye_inverter_time_of_use_{idx}_grid_charge"] = FakeState("off")
     if soc is not None:
         states[const.DEFAULT_BATTERY_SOC] = FakeState(soc)
     if price is not None:
@@ -172,6 +182,7 @@ def make_runtime(soc="50", price="0.50", default_mode=None):
     runtime.default_discharge_current = 120
     runtime.default_charge_current = 120
     runtime.default_grid_charge_current = 60
+    runtime.control_verification_delays = (0.0, 0.0, 0.0)
     return runtime
 
 
@@ -434,6 +445,42 @@ class MappingAndTransactionTests(unittest.TestCase):
         ]
         self.assertEqual(ordered_control_calls[-1][2]["option"], const.MODE_SELLING_FIRST)
         self.assertTrue(all(call[:2] == ("number", "set_value") for call in ordered_control_calls[:-1]))
+
+    def test_delayed_work_mode_is_retried_and_confirmed(self):
+        runtime = make_runtime()
+        configure_selling_slot(runtime)
+        runtime.hass.services.ignore_once(
+            "select", "select_option", entity_id=const.DEFAULT_WORK_MODE_SELECT,
+            option=const.MODE_SELLING_FIRST,
+        )
+        self.assertTrue(asyncio.run(runtime.async_apply_targets()))
+        select_calls = [call for call in runtime.hass.services.calls if call[:2] == ("select", "select_option")]
+        self.assertGreaterEqual(len(select_calls), 2)
+        self.assertEqual(runtime.last_schedule_attempt["status"], "applied")
+        self.assertEqual(runtime.hass.states.get(const.DEFAULT_WORK_MODE_SELECT).state, const.MODE_SELLING_FIRST)
+
+    def test_failed_schedule_is_reported_instead_of_selling_active(self):
+        runtime = make_runtime()
+        configure_selling_slot(runtime)
+        runtime.control_verification_delays = (0.0, 0.0)
+        runtime.hass.services.ignore_once("select", "select_option", entity_id=const.DEFAULT_WORK_MODE_SELECT, option=const.MODE_SELLING_FIRST)
+        runtime.hass.services.ignore_once("select", "select_option", entity_id=const.DEFAULT_WORK_MODE_SELECT, option=const.MODE_SELLING_FIRST)
+        self.assertFalse(asyncio.run(runtime.async_apply_targets()))
+        self.assertEqual(runtime.manager_status, "SCHEDULE APPLY ERROR")
+        self.assertEqual(runtime.last_schedule_attempt["status"], "failed")
+        self.assertIn("System Work Mode", runtime.last_schedule_attempt["message"])
+
+    def test_resume_manager_enables_schedule_without_enabling_grid_charge_scheduler(self):
+        runtime = make_runtime()
+        configure_selling_slot(runtime)
+        runtime.control_mode = "Stop Sell"
+        runtime.scheduler_enabled = False
+        runtime.charge_scheduler_enabled = False
+        asyncio.run(runtime.async_resume_manager())
+        self.assertEqual(runtime.control_mode, "Schedule")
+        self.assertTrue(runtime.scheduler_enabled)
+        self.assertFalse(runtime.charge_scheduler_enabled)
+        self.assertEqual(runtime.hass.states.get(const.DEFAULT_WORK_MODE_SELECT).state, const.MODE_SELLING_FIRST)
 
     def test_direct_settings_do_not_use_transitional_zeroes(self):
         runtime = make_runtime()
