@@ -10,26 +10,19 @@ from homeassistant.core import callback
 from homeassistant.helpers import selector
 
 from .const import (
-    CONF_BATTERY_POSITIVE_IS_DISCHARGE,
     CONF_BATTERY_POWER_SENSOR,
     CONF_BATTERY_SOC_SENSOR,
     CONF_BUY_PRICE_TODAY_SENSOR,
     CONF_BUY_PRICE_TOMORROW_SENSOR,
     CONF_CHARGE_CURRENT_NUMBER,
-    CONF_CUSTOM_OFFPEAK_WINDOWS,
     CONF_DAILY_PV_PRODUCTION_SENSOR,
     CONF_DISCHARGE_CURRENT_NUMBER,
-    CONF_DISTRIBUTION_OFFPEAK_RATE,
-    CONF_DISTRIBUTION_PEAK_RATE,
     CONF_GRID_CHARGE_CURRENT_NUMBER,
-    CONF_GRID_POSITIVE_IS_IMPORT,
     CONF_GRID_POWER_SENSOR,
     CONF_LOAD_POWER_SENSOR,
     CONF_MAPPING_MODE,
     CONF_MAX_SELL_POWER_NUMBER,
-    CONF_OSD_PROVIDER,
     CONF_PRICE_SENSOR,
-    CONF_PRICE_SOURCE,
     CONF_PV_POWER_SENSOR,
     CONF_SELL_PRICE_TOMORROW_SENSOR,
     CONF_SOLCAST_CURRENT_POWER_SENSOR,
@@ -43,29 +36,21 @@ from .const import (
     CONF_SOLCAST_PEAK_POWER_TODAY_SENSOR,
     CONF_SOLCAST_PEAK_TIME_TODAY_SENSOR,
     CONF_SOLCAST_REMAINING_TODAY_SENSOR,
-    CONF_TARIFF_PLAN,
     CONF_WEATHER_ENTITY,
     CONF_WORK_MODE_SELECT,
-    DEFAULT_BATTERY_POSITIVE_IS_DISCHARGE,
     DEFAULT_BATTERY_POWER_SENSOR,
     DEFAULT_BATTERY_SOC,
     DEFAULT_BUY_PRICE_TODAY_SENSOR,
     DEFAULT_BUY_PRICE_TOMORROW_SENSOR,
     DEFAULT_CHARGE_CURRENT,
-    DEFAULT_CUSTOM_OFFPEAK_WINDOWS,
     DEFAULT_DAILY_PV_PRODUCTION_SENSOR,
     DEFAULT_DISCHARGE_CURRENT,
-    DEFAULT_DISTRIBUTION_OFFPEAK_RATE,
-    DEFAULT_DISTRIBUTION_PEAK_RATE,
     DEFAULT_GRID_CHARGE_CURRENT,
-    DEFAULT_GRID_POSITIVE_IS_IMPORT,
     DEFAULT_GRID_POWER_SENSOR,
     DEFAULT_LOAD_POWER_SENSOR,
     DEFAULT_MAPPING_MODE,
     DEFAULT_MAX_SELL_POWER,
-    DEFAULT_OSD_PROVIDER,
     DEFAULT_PRICE_SENSOR,
-    DEFAULT_PRICE_SOURCE,
     DEFAULT_PV_POWER_SENSOR,
     DEFAULT_SELL_PRICE_TOMORROW_SENSOR,
     DEFAULT_SOLCAST_CURRENT_POWER_SENSOR,
@@ -79,7 +64,6 @@ from .const import (
     DEFAULT_SOLCAST_PEAK_POWER_TODAY_SENSOR,
     DEFAULT_SOLCAST_PEAK_TIME_TODAY_SENSOR,
     DEFAULT_SOLCAST_REMAINING_TODAY_SENSOR,
-    DEFAULT_TARIFF_PLAN,
     DEFAULT_WEATHER_ENTITY,
     DEFAULT_WORK_MODE_SELECT,
     DOMAIN,
@@ -203,20 +187,9 @@ class MappingWizardMixin:
         if user_input is not None:
             self._values.update(user_input)
             return await self.async_step_solcast()
-        schema: dict[Any, Any] = {
-            vol.Required(CONF_PRICE_SOURCE, default=self._values.get(CONF_PRICE_SOURCE, DEFAULT_PRICE_SOURCE)): select_with_labels([("pstryk", "Pstryk"), ("pse_rce", "PSE / RCE"), ("other", "Inne źródło"), ("none", "Bez cen")]),
-            vol.Required(CONF_OSD_PROVIDER, default=self._values.get(CONF_OSD_PROVIDER, DEFAULT_OSD_PROVIDER)): select_with_labels([("pge", "PGE Dystrybucja"), ("tauron", "Tauron Dystrybucja"), ("enea", "Enea Operator"), ("energa", "Energa Operator"), ("stoen", "Stoen Operator"), ("other", "Inny operator")]),
-            vol.Required(CONF_TARIFF_PLAN, default=self._values.get(CONF_TARIFF_PLAN, DEFAULT_TARIFF_PLAN)): select_with_labels([("g11", "G11 — całodobowa"), ("g12", "G12 — dwustrefowa"), ("g12w", "G12w — weekendowa"), ("g12e", "G12e — elastyczna"), ("custom", "Profil własny")]),
-            vol.Required(CONF_DISTRIBUTION_PEAK_RATE, default=self._values.get(CONF_DISTRIBUTION_PEAK_RATE, DEFAULT_DISTRIBUTION_PEAK_RATE)): vol.All(vol.Coerce(float), vol.Range(min=0, max=5)),
-            vol.Required(CONF_DISTRIBUTION_OFFPEAK_RATE, default=self._values.get(CONF_DISTRIBUTION_OFFPEAK_RATE, DEFAULT_DISTRIBUTION_OFFPEAK_RATE)): vol.All(vol.Coerce(float), vol.Range(min=0, max=5)),
-            vol.Required(CONF_CUSTOM_OFFPEAK_WINDOWS, default=self._values.get(CONF_CUSTOM_OFFPEAK_WINDOWS, DEFAULT_CUSTOM_OFFPEAK_WINDOWS)): str,
-            vol.Required(CONF_GRID_POSITIVE_IS_IMPORT, default=self._values.get(CONF_GRID_POSITIVE_IS_IMPORT, DEFAULT_GRID_POSITIVE_IS_IMPORT)): selector.BooleanSelector(),
-            vol.Required(CONF_BATTERY_POSITIVE_IS_DISCHARGE, default=self._values.get(CONF_BATTERY_POSITIVE_IS_DISCHARGE, DEFAULT_BATTERY_POSITIVE_IS_DISCHARGE)): selector.BooleanSelector(),
-        }
-        for key in PRICE_FIELDS:
-            _default, domain, _tokens = ENTITY_SPECS[key]
-            schema[vol.Optional(key, default=self._entity_default(key))] = selector.EntitySelector(selector.EntitySelectorConfig(domain=domain))
-        return self.async_show_form(step_id="prices", data_schema=vol.Schema(schema))
+        # This wizard maps Home Assistant entities only. Operator, tariff,
+        # rates and flow signs are edited in the card after explicit saving.
+        return self.async_show_form(step_id="prices", data_schema=self._entity_schema(PRICE_FIELDS))
 
     async def async_step_solcast(self, user_input=None):
         if user_input is not None:

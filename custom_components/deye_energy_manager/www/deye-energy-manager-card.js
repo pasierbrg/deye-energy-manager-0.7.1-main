@@ -26,6 +26,8 @@ class DeyeEnergyManagerCard extends HTMLElement {
     this._aiSettingsSaveTimer = null;
     this._updateFrame = null;
     this._lastSlowSignature = "";
+    this._tariffDraft = null;
+    this._tariffSaveStatus = "";
   }
 
   connectedCallback() {
@@ -1277,6 +1279,12 @@ class DeyeEnergyManagerCard extends HTMLElement {
         event,
         bestSell: ai.bestSell.slice(0, 3),
         cheapBuy: ai.cheapBuy.slice(0, 3),
+        cheapBuy48: (ai.cheapBuy48 || []).slice(0, 6),
+        tariff: {
+          provider: ai.tariff?.provider,
+          plan: ai.tariff?.plan,
+          catalog_version: ai.tariff?.catalog_version,
+        },
         solcastToday: ai.solcastToday,
         solcastRemaining: ai.solcastRemaining,
         dailyPv: ai.dailyPv,
@@ -1403,12 +1411,25 @@ class DeyeEnergyManagerCard extends HTMLElement {
   configurationSnapshot() {
     const values = {};
     this.editableConfigEntities().forEach((entityId) => { values[entityId] = this.state(entityId); });
+    const tariff = this.tariffData();
     return {
       format: "deye-energy-manager-config",
       version: "0.7.6",
       created_at: new Date().toISOString(),
       values,
       ai_settings: this.aiSettings(),
+      tariff_settings: {
+        tariff_mode: tariff.mode || "automatic",
+        osd_provider: tariff.provider || "pge",
+        tariff_plan: tariff.plan || "g11",
+        distribution_peak_rate: tariff.peak_rate ?? 0,
+        distribution_offpeak_rate: tariff.offpeak_rate ?? 0,
+        custom_offpeak_windows: tariff.custom_offpeak_windows || "13:00-15:00,22:00-06:00",
+        price_source: tariff.price_source || "pstryk",
+        price_includes_distribution: Boolean(tariff.price_includes_distribution),
+        grid_positive_is_import: tariff.grid_positive_is_import !== false,
+        battery_positive_is_discharge: tariff.battery_positive_is_discharge !== false,
+      },
       card: { theme: this.config?.theme || "deye" },
     };
   }
@@ -1434,6 +1455,9 @@ class DeyeEnergyManagerCard extends HTMLElement {
       else if (domain === "input_datetime") await this.callService(domain, "set_datetime", { entity_id: entityId, time: String(value).slice(0, 8) });
     }
     if (snapshot.ai_settings && typeof snapshot.ai_settings === "object") this.saveAiSettings(snapshot.ai_settings);
+    if (snapshot.tariff_settings && typeof snapshot.tariff_settings === "object") {
+      await this.callService("deye_energy_manager", "save_tariff_settings", { data: JSON.stringify(snapshot.tariff_settings) });
+    }
     for (const entityId of [chargeScheduler, scheduler]) {
       if (!entityId || !this.exists(entityId) || !(entityId in snapshot.values)) continue;
       await this.callService("switch", snapshot.values[entityId] === "on" ? "turn_on" : "turn_off", { entity_id: entityId });
@@ -1450,12 +1474,12 @@ class DeyeEnergyManagerCard extends HTMLElement {
 
   createConfigurationBackup() {
     const snapshot = this.configurationSnapshot();
-    localStorage.setItem("deye_energy_manager_config_backup_v074", JSON.stringify(snapshot));
+    localStorage.setItem("deye_energy_manager_config_backup_v076", JSON.stringify(snapshot));
     this.downloadHistory(`deye-kopia-zapasowa-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(snapshot, null, 2), "application/json");
   }
 
   async restoreConfigurationBackup() {
-    const raw = localStorage.getItem("deye_energy_manager_config_backup_v074");
+    const raw = localStorage.getItem("deye_energy_manager_config_backup_v076") || localStorage.getItem("deye_energy_manager_config_backup_v074");
     if (!raw) throw new Error("Brak lokalnej kopii zapasowej");
     await this.applyConfigurationSnapshot(JSON.parse(raw));
   }
@@ -1489,6 +1513,109 @@ class DeyeEnergyManagerCard extends HTMLElement {
 
   aiCheck(name, label, value) {
     return `<div class="settings-row"><span>${label}</span><input data-ai-setting="${name}" type="checkbox" ${value ? "checked" : ""}></div>`;
+  }
+
+  tariffData() {
+    const tariffState = this._hass?.states?.[this.entity("sensor", "tariff_status")];
+    const aiState = this._hass?.states?.[this.entity("sensor", "ai_state")];
+    return tariffState?.attributes || aiState?.attributes?.learning_summary?.tariff || aiState?.attributes?.tariff || {};
+  }
+
+  tariffZoneLabel(zone) {
+    return {
+      all_day: "Całodobowa", peak: "Szczytowa", offpeak: "Tania / pozaszczytowa",
+      morning_peak: "Szczyt przedpołudniowy", afternoon_peak: "Szczyt popołudniowy",
+      day_peak: "Dzienna szczytowa", day_offpeak: "Dzienna pozaszczytowa", night: "Nocna",
+      recommended: "Zalecany pobór", restriction: "Zalecane ograniczenie", normal: "Pozostałe godziny",
+      other: "Pozostałe godziny", dynamic_unavailable: "Brak sygnału dynamicznego",
+    }[zone] || String(zone || "brak");
+  }
+
+  localDateKey(date = new Date()) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  collectTariffDraft() {
+    const draft = { ...(this._tariffDraft || {}) };
+    this.querySelectorAll("[data-tariff-field]").forEach((el) => {
+      const key = el.dataset.tariffField;
+      if (el.type === "checkbox") draft[key] = el.checked;
+      else if (["distribution_peak_rate", "distribution_offpeak_rate"].includes(key)) draft[key] = this.asNumber(el.value) ?? el.value;
+      else draft[key] = el.value;
+    });
+    this._tariffDraft = draft;
+    return draft;
+  }
+
+  async saveTariffSettings() {
+    const button = this.querySelector("[data-save-tariff]");
+    if (button) button.disabled = true;
+    try {
+      const data = this.collectTariffDraft();
+      await this.callService("deye_energy_manager", "save_tariff_settings", { data: JSON.stringify(data) });
+      this._tariffDraft = null;
+      this._tariffSaveStatus = "Zapisano. Profil i sugestie AI korzystają z nowych ustawień.";
+    } catch (error) {
+      this._tariffSaveStatus = `Błąd zapisu: ${error?.message || error}`;
+    }
+    this.render();
+  }
+
+  renderTariffTab() {
+    const tariff = this.tariffData();
+    const draft = {
+      tariff_mode: tariff.mode || "automatic",
+      osd_provider: tariff.provider || "pge",
+      tariff_plan: tariff.plan || "g11",
+      price_source: tariff.price_source || "pstryk",
+      price_includes_distribution: Boolean(tariff.price_includes_distribution),
+      distribution_peak_rate: tariff.peak_rate ?? 0,
+      distribution_offpeak_rate: tariff.offpeak_rate ?? 0,
+      custom_offpeak_windows: tariff.custom_offpeak_windows || "13:00-15:00,22:00-06:00",
+      grid_positive_is_import: tariff.grid_positive_is_import !== false,
+      battery_positive_is_discharge: tariff.battery_positive_is_discharge !== false,
+      ...(this._tariffDraft || {}),
+    };
+    const providers = Array.isArray(tariff.providers) ? tariff.providers : [];
+    const selectedProvider = providers.find((item) => item.id === draft.osd_provider);
+    const tariffs = selectedProvider?.tariffs || (Array.isArray(tariff.tariffs) ? tariff.tariffs : []);
+    if (tariffs.length && !tariffs.some((item) => item.id === draft.tariff_plan)) draft.tariff_plan = tariffs[0].id;
+    const options = (rows, selected) => rows.map((item) => {
+      const reason = item.available === false && item.unavailable_reason ? ` — ${item.unavailable_reason}` : "";
+      const disabled = item.available === false && item.id !== selected ? "disabled" : "";
+      return `<option value="${this.escapeHtml(item.id)}" ${item.id === selected ? "selected" : ""} ${disabled}>${this.escapeHtml(`${item.name}${reason}`)}</option>`;
+    }).join("");
+    const rows = Array.isArray(tariff.hourly_profile) ? tariff.hourly_profile : [];
+    const profileRows = rows.map((row) => `<tr>
+      <td>${this.escapeHtml(row.date || "")}</td><td>${this.escapeHtml(row.label || this.hourLabel(Number(row.hour)))}</td>
+      <td>${this.escapeHtml(this.tariffZoneLabel(row.zone))}</td><td>${this.formatNumber(row.rate, 4)}</td>
+      <td>${this.formatNumber(row.common_rate, 4)}</td><td>${this.formatNumber(row.total_distribution_rate ?? row.rate, 4)}</td>
+      <td>${row.holiday ? "święto" : row.weekend ? "weekend" : "dzień roboczy"}</td>
+    </tr>`).join("");
+    const statusClass = tariff.catalog_error ? "bad" : tariff.configured ? "good" : "warn";
+    const manual = draft.tariff_mode === "manual";
+    return `<div class="hint">Operator, taryfa i stawki są zapisywane dopiero przyciskiem <b>Zapisz ustawienia</b>. Profil obejmuje dziś i jutro; weekendy, święta i sezony są wyliczane automatycznie.</div>
+      <div class="diagnostic-summary"><div><span>Operator OSD</span><strong>${this.escapeHtml(tariff.provider_name || "brak")}</strong></div><div><span>Taryfa / sezon</span><strong>${this.escapeHtml(tariff.plan_name || "brak")} · ${tariff.season === "summer" ? "lato" : tariff.season === "winter" ? "zima" : "brak"}</strong></div><div><span>Bieżąca strefa</span><strong>${this.escapeHtml(this.tariffZoneLabel(tariff.zone))} · ${this.formatNumber(tariff.total_distribution_rate ?? tariff.distribution_rate, 4)} PLN/kWh</strong></div><div><span>Katalog</span><strong class="${statusClass}">${this.escapeHtml(tariff.catalog_version || "wbudowany")} · ${this.escapeHtml(tariff.catalog_source || "brak")}</strong></div></div>
+      <section class="diagnostic-section"><h3>Ustawienia operatora i taryfy</h3>
+        <div class="settings-row"><span>Tryb stawek</span><select data-tariff-field="tariff_mode"><option value="automatic" ${!manual ? "selected" : ""}>Automatyczny katalog OSD</option><option value="manual" ${manual ? "selected" : ""}>Profil ręczny</option></select></div>
+        <div class="settings-row"><span>Operator OSD</span><select data-tariff-field="osd_provider">${options(providers, draft.osd_provider)}</select></div>
+        <div class="settings-row"><span>Taryfa</span><select data-tariff-field="tariff_plan">${options(tariffs, draft.tariff_plan)}</select></div>
+        <div class="settings-row"><span>Źródło cen energii</span><select data-tariff-field="price_source"><option value="pstryk" ${draft.price_source === "pstryk" ? "selected" : ""}>Pstryk</option><option value="pse_rce" ${draft.price_source === "pse_rce" ? "selected" : ""}>PSE / RCE</option><option value="other" ${draft.price_source === "other" ? "selected" : ""}>Inne</option><option value="none" ${draft.price_source === "none" ? "selected" : ""}>Bez cen energii</option></select></div>
+        <div class="settings-row"><span>Cena zakupu zawiera już dystrybucję</span><input data-tariff-field="price_includes_distribution" type="checkbox" ${draft.price_includes_distribution ? "checked" : ""}></div>
+        <div class="settings-row"><span>Stawka szczytowa [PLN/kWh]</span><input data-tariff-field="distribution_peak_rate" type="text" inputmode="decimal" value="${this.escapeHtml(draft.distribution_peak_rate)}" ${manual ? "" : "disabled"}></div>
+        <div class="settings-row"><span>Stawka tania [PLN/kWh]</span><input data-tariff-field="distribution_offpeak_rate" type="text" inputmode="decimal" value="${this.escapeHtml(draft.distribution_offpeak_rate)}" ${manual ? "" : "disabled"}></div>
+        <div class="settings-row"><span>Własne tanie godziny</span><input data-tariff-field="custom_offpeak_windows" type="text" value="${this.escapeHtml(draft.custom_offpeak_windows)}" ${manual ? "" : "disabled"}></div>
+        <div class="settings-row"><span>Dodatnia moc sieci oznacza pobór</span><input data-tariff-field="grid_positive_is_import" type="checkbox" ${draft.grid_positive_is_import ? "checked" : ""}></div>
+        <div class="settings-row"><span>Dodatnia moc baterii oznacza rozładowanie</span><input data-tariff-field="battery_positive_is_discharge" type="checkbox" ${draft.battery_positive_is_discharge ? "checked" : ""}></div>
+        <div class="diagnostic-actions"><button class="wide-action" data-save-tariff="1">Zapisz ustawienia</button><button data-refresh-tariff="1">Sprawdź aktualizację katalogu</button></div>
+        ${this._tariffSaveStatus ? `<div class="hint">${this.escapeHtml(this._tariffSaveStatus)}</div>` : ""}
+        ${tariff.catalog_error ? `<div class="hint bad">${this.escapeHtml(tariff.catalog_error)}. Używany jest ostatni poprawny katalog.</div>` : ""}
+        ${tariff.tariff_error ? `<div class="hint bad">Wybrany profil nie jest dostępny: ${this.escapeHtml(tariff.tariff_error)}. AI nie użyje go do planowania ładowania.</div>` : ""}
+      </section>
+      <section class="diagnostic-section"><h3>Profil kosztu dystrybucji — dziś i jutro</h3><div class="diagnostic-entities"><table class="settings-table"><thead><tr><th>Data</th><th>Godzina</th><th>Strefa</th><th>Sieciowa</th><th>Opłaty zmienne</th><th>Razem</th><th>Rodzaj dnia</th></tr></thead><tbody>${profileRows || '<tr><td colspan="7">Brak profilu. Wybierz operatora i taryfę, a następnie zapisz.</td></tr>'}</tbody></table></div></section>`;
   }
 
   aiNumber(name, label, value, unit = "") {
@@ -1898,17 +2025,25 @@ class DeyeEnergyManagerCard extends HTMLElement {
     const learning = aiState?.attributes?.learning_summary || {};
     const sellPriceToday = this.entity("sensor", ["sell_price_today", "energy_price"]);
     const buyPriceToday = this.entity("sensor", "buy_price_today");
+    const buyPriceTomorrow = this.entity("sensor", "buy_price_tomorrow");
     const solcastToday = this.asNumber(this.state(this.entity("sensor", "solcast_forecast_today"), 0)) || 0;
     const solcastRemaining = this.asNumber(this.state(this.entity("sensor", "solcast_remaining_today"), 0)) || 0;
     const dailyPv = this.asNumber(this.state(this.entity("sensor", "daily_pv_production"), 0)) || 0;
     const soldToday = this.asNumber(this.state(this.entity("sensor", "sold_energy_today"), 0)) || 0;
     const sellPrices = this.readPriceMap(sellPriceToday);
     const buyPrices = this.readPriceMap(buyPriceToday);
-    const tariffEntity = this._hass?.states?.[this.entity("sensor", "tariff_status")];
-    const tariff = tariffEntity?.attributes || learning.tariff || {};
-    const distributionByHour = new Map((Array.isArray(tariff.hourly_profile) ? tariff.hourly_profile : [])
-      .map((row) => [Number(row.hour), this.asNumber(row.rate) || 0]));
-    const totalBuyPrices = new Map([...buyPrices.entries()].map(([hour, price]) => [hour, price + (distributionByHour.get(hour) || 0)]));
+    const buyPricesTomorrow = this.readPriceMap(buyPriceTomorrow);
+    const tariff = this.tariffData();
+    const todayKey = this.localDateKey();
+    const tomorrowDate = new Date();
+    tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+    const tomorrowKey = this.localDateKey(tomorrowDate);
+    const distributionByKey = new Map((Array.isArray(tariff.hourly_profile) ? tariff.hourly_profile : []).filter((row) => row.available !== false)
+      .map((row) => [`${row.date || todayKey}:${Number(row.hour)}`, this.asNumber(row.total_distribution_rate ?? row.rate) || 0]));
+    const distributionCost = (date, hour) => tariff.price_includes_distribution ? 0 : (distributionByKey.get(`${date}:${hour}`) || 0);
+    const tariffReady = tariff.configured !== false;
+    const totalBuyPrices = tariffReady ? new Map([...buyPrices.entries()].map(([hour, price]) => [hour, price + distributionCost(todayKey, hour)])) : new Map();
+    const totalBuyPricesTomorrow = tariffReady ? new Map([...buyPricesTomorrow.entries()].map(([hour, price]) => [hour, price + distributionCost(tomorrowKey, hour)])) : new Map();
     const minSell = this.asNumber(settings.minSellPrice) ?? 0;
     const maxBuy = this.asNumber(settings.maxBuyPrice) ?? Number.POSITIVE_INFINITY;
     const profileRows = Array.isArray(learning.hourly_profile) ? learning.hourly_profile : [];
@@ -1928,6 +2063,10 @@ class DeyeEnergyManagerCard extends HTMLElement {
       .sort((a, b) => (sellRanking.get(b[0]) || b[1]) - (sellRanking.get(a[0]) || a[1]))
       .slice(0, 4);
     const cheapBuy = [...totalBuyPrices.entries()].filter(([, price]) => price <= maxBuy).sort((a, b) => a[1] - b[1]).slice(0, 4);
+    const cheapBuy48 = [
+      ...[...totalBuyPrices.entries()].map(([hour, price]) => ({ day: "Dziś", date: todayKey, hour, price })),
+      ...[...totalBuyPricesTomorrow.entries()].map(([hour, price]) => ({ day: "Jutro", date: tomorrowKey, hour, price })),
+    ].filter((row) => row.price <= maxBuy).sort((a, b) => a.price - b.price).slice(0, 8);
     const activeConfigured = slots.filter(([key, label]) => {
       const e = this.slotEntities(key, label);
       return this.state(e.sellEnabled) === "on";
@@ -1967,7 +2106,9 @@ class DeyeEnergyManagerCard extends HTMLElement {
     return {
       bestSell,
       cheapBuy,
+      cheapBuy48,
       totalBuyPrices,
+      totalBuyPricesTomorrow,
       tariff,
       settings,
       activeConfigured,
@@ -2230,11 +2371,6 @@ class DeyeEnergyManagerCard extends HTMLElement {
         </tr>`;
       }).join("");
       const aiSettings = this.aiSettings();
-      const tariffState = this._hass?.states?.[this.entity("sensor", "tariff_status")];
-      const tariff = tariffState?.attributes || {};
-      const tariffRows = (Array.isArray(tariff.hourly_profile) ? tariff.hourly_profile : []).map((row) => `<tr>
-        <td>${this.hourLabel(Number(row.hour))}</td><td>${row.zone === "offpeak" ? "Tania" : row.zone === "all_day" ? "Całodobowa" : "Szczytowa"}</td><td>${this.formatNumber(row.rate, 4)} PLN/kWh</td><td>${row.weekend ? "weekend" : row.holiday ? "święto" : "dzień roboczy"}</td>
-      </tr>`).join("");
       const segments = this.scheduleSegments(slots);
       const segmentRows = segments.map((item, index) => `<tr>
         <td>${index + 1}</td>
@@ -2288,9 +2424,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
            ${this.aiCheck("allowBatterySell", "AI może sugerować sprzedaż z baterii", aiSettings.allowBatterySell)}
            ${this.aiCheck("allowDeyeMode", "AI może sugerować zmianę trybu Deye", aiSettings.allowDeyeMode)}`;
       } else if (tab === "tariff") {
-        body = `<div class="hint">Koszt dystrybucji jest dodawany do ceny zakupu przy wyborze najtańszych godzin ładowania. Profil, stawki i znaki przepływu zmienisz w opcjach integracji.</div>
-          <div class="diagnostic-summary"><div><span>Operator OSD</span><strong>${this.escapeHtml(tariff.provider_name || "brak")}</strong></div><div><span>Taryfa / sezon</span><strong>${this.escapeHtml(tariff.plan_name || "brak")} · ${tariff.season === "summer" ? "lato" : tariff.season === "winter" ? "zima" : "brak"}</strong></div><div><span>Bieżąca strefa</span><strong>${this.escapeHtml(tariff.zone || "brak")} · ${this.formatNumber(tariff.distribution_rate, 4)} PLN/kWh</strong></div></div>
-          <section class="diagnostic-section"><h3>Profil dystrybucji na 24 godziny</h3><div class="diagnostic-entities"><table class="settings-table"><thead><tr><th>Godzina</th><th>Strefa</th><th>Dystrybucja</th><th>Rodzaj dnia</th></tr></thead><tbody>${tariffRows || '<tr><td colspan="4">Brak profilu taryfowego</td></tr>'}</tbody></table></div></section>`;
+        body = this.renderTariffTab();
       } else if (tab === "history") {
         body = this.renderHistoryTab();
       } else if (tab === "system") {
@@ -2323,7 +2457,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
         this._aiProposalSelection = new Set(proposal.rows.filter((row) => row.enabled).map((row) => row.key));
       }
       const sellRows = ai.bestSell.length ? ai.bestSell.map(([hour, price]) => `<li>${this.hourLabel(hour)}: ${this.formatPrice(price)} PLN/kWh</li>`).join("") : "<li>Brak danych cen sprzedaży</li>";
-      const buyRows = ai.cheapBuy.length ? ai.cheapBuy.map(([hour, price]) => `<li>${this.hourLabel(hour)}: ${this.formatPrice(price)} PLN/kWh</li>`).join("") : "<li>Brak danych cen zakupu</li>";
+      const buyRows = ai.cheapBuy48?.length ? ai.cheapBuy48.map((row) => `<li>${row.day}, ${this.hourLabel(row.hour)}: ${this.formatPrice(row.price)} PLN/kWh</li>`).join("") : "<li>Brak danych cen zakupu dziś i jutro</li>";
       const strategyLabel = { balanced: "Zrównoważony", profit: "Maksymalny zysk", autoconsumption: "Maksymalna autokonsumpcja" }[ai.settings.strategy] || ai.settings.strategy;
       const correction = ai.forecastCorrection ? `×${ai.forecastCorrection.toFixed(2)} (${ai.learning?.solcast_accuracy_days || 0} dni)` : "brak danych";
       const historicalAccuracy = this.asNumber(ai.learning?.solcast_accuracy_avg);
@@ -2804,6 +2938,27 @@ class DeyeEnergyManagerCard extends HTMLElement {
     }));
     this.querySelectorAll("[data-settings-tab]").forEach((el) => el.addEventListener("click", () => {
       this._settingsTab = el.dataset.settingsTab;
+      this._tariffDraft = null;
+      this.render();
+    }));
+    this.querySelectorAll("[data-tariff-field='tariff_mode'],[data-tariff-field='osd_provider']").forEach((el) => el.addEventListener("change", () => {
+      const draft = this.collectTariffDraft();
+      if (el.dataset.tariffField === "osd_provider") {
+        const provider = this.tariffData().providers?.find((item) => item.id === draft.osd_provider);
+        if (provider?.tariffs?.length) draft.tariff_plan = provider.tariffs[0].id;
+      }
+      this._tariffDraft = draft;
+      this.render();
+    }));
+    this.querySelectorAll("[data-save-tariff]").forEach((el) => el.addEventListener("click", () => this.saveTariffSettings()));
+    this.querySelectorAll("[data-refresh-tariff]").forEach((el) => el.addEventListener("click", async () => {
+      el.disabled = true;
+      try {
+        await this.callService("deye_energy_manager", "refresh_tariff_catalog", {});
+        this._tariffSaveStatus = "Sprawdzono katalog. Aktywna pozostaje najnowsza poprawna wersja.";
+      } catch (error) {
+        this._tariffSaveStatus = `Nie udało się sprawdzić katalogu: ${error?.message || error}`;
+      }
       this.render();
     }));
     this.querySelectorAll("[data-toggle-selection]").forEach((el) => el.addEventListener("click", () => {

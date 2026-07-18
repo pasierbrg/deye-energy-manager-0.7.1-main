@@ -47,6 +47,9 @@ from .const import (
     CONF_DISTRIBUTION_PEAK_RATE,
     CONF_DISTRIBUTION_OFFPEAK_RATE,
     CONF_CUSTOM_OFFPEAK_WINDOWS,
+    CONF_TARIFF_MODE,
+    CONF_PRICE_INCLUDES_DISTRIBUTION,
+    CONF_TARIFF_CATALOG_URL,
     CONTROL_MODES,
     DOMAIN,
     MODE_SELLING_FIRST,
@@ -85,10 +88,24 @@ from .const import (
     DEFAULT_DISTRIBUTION_PEAK_RATE,
     DEFAULT_DISTRIBUTION_OFFPEAK_RATE,
     DEFAULT_CUSTOM_OFFPEAK_WINDOWS,
+    DEFAULT_TARIFF_MODE,
+    DEFAULT_PRICE_INCLUDES_DISTRIBUTION,
+    DEFAULT_TARIFF_CATALOG_URL,
     DEFAULT_GRID_POSITIVE_IS_IMPORT,
     DEFAULT_BATTERY_POSITIVE_IS_DISCHARGE,
 )
-from .tariffs import PROVIDER_LABELS, TARIFF_LABELS, hourly_tariff_profile, tariff_zone
+from .tariff_catalog import TariffCatalogManager
+from .tariffs import (
+    PROVIDER_LABELS,
+    TARIFF_LABELS,
+    available_tariffs,
+    catalog_hourly_profile,
+    get_tariff,
+    hourly_tariff_profile,
+    parse_windows,
+    tariff_availability,
+    tariff_zone,
+)
 
 
 @dataclass
@@ -138,6 +155,7 @@ class DeyeEnergyManagerRuntime:
     _solcast_store: Store | None = None
     _learning_store: Store | None = None
     _samples_store: Store | None = None
+    _tariff_catalog_manager: TariffCatalogManager | None = None
     _stats_dirty: bool = False
     sales_stats: dict[str, Any] = field(default_factory=dict)
     ai_settings: dict[str, Any] = field(default_factory=dict)
@@ -335,6 +353,23 @@ class DeyeEnergyManagerRuntime:
     def custom_offpeak_windows(self) -> str:
         return str(self.data.get(CONF_CUSTOM_OFFPEAK_WINDOWS, DEFAULT_CUSTOM_OFFPEAK_WINDOWS))
 
+    @property
+    def tariff_mode(self) -> str:
+        value = str(self.data.get(CONF_TARIFF_MODE, DEFAULT_TARIFF_MODE)).lower()
+        return value if value in ("automatic", "manual") else DEFAULT_TARIFF_MODE
+
+    @property
+    def price_includes_distribution(self) -> bool:
+        return bool(self.data.get(CONF_PRICE_INCLUDES_DISTRIBUTION, DEFAULT_PRICE_INCLUDES_DISTRIBUTION))
+
+    @property
+    def tariff_catalog(self) -> dict[str, Any]:
+        if self._tariff_catalog_manager is not None:
+            return self._tariff_catalog_manager.catalog
+        from .tariffs import load_bundled_catalog
+
+        return load_bundled_catalog()
+
     def normalized_grid_power(self) -> float:
         value = self.state_float(self.grid_power_sensor, 0)
         return value if bool(self.data.get(CONF_GRID_POSITIVE_IS_IMPORT, DEFAULT_GRID_POSITIVE_IS_IMPORT)) else -value
@@ -345,29 +380,138 @@ class DeyeEnergyManagerRuntime:
 
     def tariff_context(self, moment: datetime | None = None) -> dict[str, Any]:
         current = moment or ha_now()
-        profile = hourly_tariff_profile(
-            current,
-            self.tariff_plan,
-            self.distribution_peak_rate,
-            self.distribution_offpeak_rate,
-            self.custom_offpeak_windows,
-            self.osd_provider,
+        catalog = self.tariff_catalog
+        tariff = get_tariff(catalog, self.osd_provider, self.tariff_plan)
+        tariff_available, tariff_error = tariff_availability(tariff, current.date()) if tariff else (False, "brak taryfy w katalogu")
+        automatic = self.tariff_mode == "automatic" and tariff is not None and tariff_available
+        if automatic:
+            profile = catalog_hourly_profile(current, catalog, self.osd_provider, self.tariff_plan, 48)
+        elif self.tariff_mode == "manual":
+            today = hourly_tariff_profile(
+                current,
+                "custom",
+                self.distribution_peak_rate,
+                self.distribution_offpeak_rate,
+                self.custom_offpeak_windows,
+                "other",
+            )
+            tomorrow = hourly_tariff_profile(
+                current + timedelta(days=1),
+                "custom",
+                self.distribution_peak_rate,
+                self.distribution_offpeak_rate,
+                self.custom_offpeak_windows,
+                "other",
+            )
+            profile = [*today, *tomorrow]
+        else:
+            profile = []
+        current_row = next(
+            (row for row in profile if row.get("date") == current.date().isoformat() and row.get("hour") == current.hour),
+            profile[current.hour] if len(profile) > current.hour else {},
         )
-        zone = tariff_zone(current, self.tariff_plan, self.custom_offpeak_windows, self.osd_provider)
-        current_row = profile[current.hour]
-        return {
+        catalog_rates = tariff.get("rates", {}) if automatic and tariff else {}
+        numeric_rates = [float(value) for value in catalog_rates.values() if isinstance(value, (int, float))]
+        display_peak_rate = max(numeric_rates) if numeric_rates else self.distribution_peak_rate
+        display_offpeak_rate = min(numeric_rates) if numeric_rates else self.distribution_offpeak_rate
+        providers = [
+            {
+                "id": key,
+                "name": str(value.get("name") or key),
+                "tariffs": available_tariffs(catalog, key),
+            }
+            for key, value in catalog.get("providers", {}).items()
+        ]
+        context = {
             "provider": self.osd_provider,
             "provider_name": PROVIDER_LABELS.get(self.osd_provider, self.osd_provider),
             "plan": self.tariff_plan,
-            "plan_name": TARIFF_LABELS.get(self.tariff_plan, self.tariff_plan.upper()),
-            "zone": zone,
+            "plan_name": str(tariff.get("name")) if tariff else TARIFF_LABELS.get(self.tariff_plan, self.tariff_plan.upper()),
+            "mode": self.tariff_mode,
+            "configured": automatic or self.tariff_mode == "manual",
+            "tariff_error": "" if automatic or self.tariff_mode == "manual" else tariff_error,
+            "zone": current_row.get("zone"),
             "season": current_row.get("season"),
-            "distribution_rate": current_row["rate"],
-            "peak_rate": self.distribution_peak_rate,
-            "offpeak_rate": self.distribution_offpeak_rate,
+            "day_type": current_row.get("day_type"),
+            "distribution_rate": current_row.get("rate", 0),
+            "common_rate": current_row.get("common_rate", 0),
+            "total_distribution_rate": current_row.get("total_distribution_rate", current_row.get("rate", 0)),
+            "peak_rate": round(display_peak_rate, 5),
+            "offpeak_rate": round(display_offpeak_rate, 5),
             "custom_offpeak_windows": self.custom_offpeak_windows,
+            "price_source": self.price_source,
+            "price_includes_distribution": self.price_includes_distribution,
+            "grid_positive_is_import": bool(self.data.get(CONF_GRID_POSITIVE_IS_IMPORT, DEFAULT_GRID_POSITIVE_IS_IMPORT)),
+            "battery_positive_is_discharge": bool(self.data.get(CONF_BATTERY_POSITIVE_IS_DISCHARGE, DEFAULT_BATTERY_POSITIVE_IS_DISCHARGE)),
+            "providers": providers,
+            "tariffs": available_tariffs(catalog, self.osd_provider),
             "hourly_profile": profile,
         }
+        if self._tariff_catalog_manager is not None:
+            context.update(self._tariff_catalog_manager.status())
+        return context
+
+    def validate_tariff_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
+        """Return a safe, normalized tariff configuration from the card."""
+        if not isinstance(settings, dict):
+            raise ValueError("Ustawienia taryfy muszą być obiektem")
+        mode = str(settings.get(CONF_TARIFF_MODE, self.tariff_mode)).lower()
+        if mode not in ("automatic", "manual"):
+            raise ValueError("Nieznany tryb taryfy")
+        provider = str(settings.get(CONF_OSD_PROVIDER, self.osd_provider)).lower()
+        plan = str(settings.get(CONF_TARIFF_PLAN, self.tariff_plan)).lower()
+        selected_tariff = get_tariff(self.tariff_catalog, provider, plan)
+        if mode == "automatic" and selected_tariff is None:
+            raise ValueError("Wybrana taryfa nie występuje w katalogu operatora")
+        if mode == "automatic" and selected_tariff is not None:
+            available, unavailable_reason = tariff_availability(selected_tariff, ha_now().date())
+            if not available:
+                raise ValueError(f"Wybrana taryfa nie może być jeszcze użyta: {unavailable_reason}")
+        if provider not in self.tariff_catalog.get("providers", {}):
+            raise ValueError("Nieznany operator OSD")
+        price_source = str(settings.get(CONF_PRICE_SOURCE, self.price_source)).lower()
+        if price_source not in ("pstryk", "pse_rce", "other", "none"):
+            raise ValueError("Nieznane źródło cen energii")
+        peak = self.safe_float(settings.get(CONF_DISTRIBUTION_PEAK_RATE), self.distribution_peak_rate)
+        offpeak = self.safe_float(settings.get(CONF_DISTRIBUTION_OFFPEAK_RATE), self.distribution_offpeak_rate)
+        if not 0 <= peak <= 10 or not 0 <= offpeak <= 10:
+            raise ValueError("Stawka dystrybucyjna musi mieścić się w zakresie 0–10 PLN/kWh")
+        windows = str(settings.get(CONF_CUSTOM_OFFPEAK_WINDOWS, self.custom_offpeak_windows)).strip()
+        if mode == "manual" and not parse_windows(windows):
+            raise ValueError("Profil ręczny wymaga poprawnych przedziałów godzin")
+        return {
+            CONF_TARIFF_MODE: mode,
+            CONF_OSD_PROVIDER: provider,
+            CONF_TARIFF_PLAN: plan,
+            CONF_DISTRIBUTION_PEAK_RATE: round(peak, 5),
+            CONF_DISTRIBUTION_OFFPEAK_RATE: round(offpeak, 5),
+            CONF_CUSTOM_OFFPEAK_WINDOWS: windows,
+            CONF_PRICE_SOURCE: price_source,
+            CONF_PRICE_INCLUDES_DISTRIBUTION: bool(settings.get(CONF_PRICE_INCLUDES_DISTRIBUTION, self.price_includes_distribution)),
+            CONF_GRID_POSITIVE_IS_IMPORT: bool(settings.get(CONF_GRID_POSITIVE_IS_IMPORT, self.data.get(CONF_GRID_POSITIVE_IS_IMPORT, DEFAULT_GRID_POSITIVE_IS_IMPORT))),
+            CONF_BATTERY_POSITIVE_IS_DISCHARGE: bool(settings.get(CONF_BATTERY_POSITIVE_IS_DISCHARGE, self.data.get(CONF_BATTERY_POSITIVE_IS_DISCHARGE, DEFAULT_BATTERY_POSITIVE_IS_DISCHARGE))),
+        }
+
+    async def async_update_tariff_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
+        normalized = self.validate_tariff_settings(settings)
+        previous = self.tariff_context()
+        self.data.update(normalized)
+        self.learning_tracking["tariff_changed_at"] = ha_now().isoformat(timespec="seconds")
+        await self.async_add_ai_analysis({
+            "type": "tariff_configuration",
+            "status": "saved",
+            "previous": {"provider": previous.get("provider"), "plan": previous.get("plan"), "catalog_version": previous.get("catalog_version")},
+            "current": {"provider": self.osd_provider, "plan": self.tariff_plan, "catalog_version": self.tariff_context().get("catalog_version")},
+        })
+        self.mark_config_saved()
+        return normalized
+
+    async def async_refresh_tariff_catalog(self) -> bool:
+        if self._tariff_catalog_manager is None:
+            return False
+        changed = await self._tariff_catalog_manager.async_refresh(force=True)
+        self.notify_update()
+        return changed
 
     def weather_context(self) -> dict[str, Any]:
         state = self.hass.states.get(self.weather_entity) if self.weather_entity else None
@@ -832,10 +976,15 @@ class DeyeEnergyManagerRuntime:
             "buy_price": self.state_float_or_none(self.buy_price_today_sensor),
             "daily_pv": self.state_float_or_none(self.daily_pv_production_sensor),
         }
+        tariff = self.tariff_context(now)
         sample = {
             "timestamp": now.replace(second=0, microsecond=0).isoformat(),
             **fields,
             "missing": [key for key, value in fields.items() if value is None],
+            "tariff": {
+                key: tariff.get(key)
+                for key in ("provider", "plan", "zone", "season", "day_type", "distribution_rate", "catalog_version")
+            },
         }
         self.energy_samples.append(sample)
         self._last_energy_sample_at = now
@@ -868,6 +1017,7 @@ class DeyeEnergyManagerRuntime:
         self.weather_last_updated = ha_now().isoformat(timespec="seconds")
 
     def _new_learning_hour(self, hour_key: str, now: datetime) -> dict[str, Any]:
+        tariff = self.tariff_context(now)
         return {
             "hour": hour_key,
             "last_sample": now.isoformat(),
@@ -885,6 +1035,10 @@ class DeyeEnergyManagerRuntime:
             "buy_price_sum": 0.0,
             "solcast_forecast_kwh": self.solcast_forecast_today_value(),
             "daily_pv_kwh": max(0, self.state_float(self.daily_pv_production_sensor, 0)),
+            "tariff": {
+                key: tariff.get(key)
+                for key in ("provider", "plan", "zone", "season", "day_type", "distribution_rate", "catalog_version")
+            },
         }
 
     def _finalize_learning_hour(self, tracking: dict[str, Any]) -> dict[str, Any]:
@@ -905,6 +1059,7 @@ class DeyeEnergyManagerRuntime:
             "buy_price_avg": round(self.safe_float(tracking.get("buy_price_sum"), 0) / samples, 3),
             "solcast_forecast_kwh": round(self.safe_float(tracking.get("solcast_forecast_kwh"), 0), 3),
             "daily_pv_kwh": round(self.safe_float(tracking.get("daily_pv_kwh"), 0), 3),
+            "tariff": tracking.get("tariff", {}),
         }
 
     async def async_update_learning_history(self) -> None:
@@ -990,6 +1145,31 @@ class DeyeEnergyManagerRuntime:
         current_actual = self.safe_float(self.solcast_tracking.get("actual"), 0)
         current_progress = min(100.0, current_actual / current_forecast * 100) if current_forecast > 0 else None
         latest = completed_rows[0] if completed_rows else {}
+        tariff_groups: dict[tuple[str, ...], list[dict[str, Any]]] = {}
+        for row in rows:
+            tariff = row.get("tariff") if isinstance(row.get("tariff"), dict) else {}
+            if not tariff:
+                continue
+            key = (
+                str(tariff.get("provider") or ""),
+                str(tariff.get("plan") or ""),
+                str(tariff.get("zone") or ""),
+                str(tariff.get("day_type") or ""),
+                str(tariff.get("season") or ""),
+                str(row.get("hour") or "")[11:13],
+            )
+            tariff_groups.setdefault(key, []).append(row)
+        tariff_learning = []
+        for key, matches in tariff_groups.items():
+            count = len(matches)
+            tariff_learning.append({
+                "provider": key[0], "plan": key[1], "zone": key[2],
+                "day_type": key[3], "season": key[4], "hour": key[5],
+                "samples": count,
+                "load_kwh": round(sum(self.safe_float(row.get("load_kwh"), 0) for row in matches) / count, 3),
+                "grid_import_kwh": round(sum(self.safe_float(row.get("grid_import_kwh"), 0) for row in matches) / count, 3),
+                "battery_charge_kwh": round(sum(self.safe_float(row.get("battery_charge_kwh"), 0) for row in matches) / count, 3),
+            })
         return {
             "retention_days": 730,
             "retention": {"raw_5_min_days": 90, "hourly_months": 24, "daily_years": 5, "monthly_limit": None},
@@ -1023,6 +1203,7 @@ class DeyeEnergyManagerRuntime:
             },
             "weather": self.weather_context(),
             "tariff": self.tariff_context(),
+            "tariff_learning": tariff_learning[:500],
             "hourly_profile": per_hour,
         }
 
@@ -1999,6 +2180,9 @@ class DeyeEnergyManagerRuntime:
         return True
 
     async def async_tick(self, *_args: Any) -> None:
+        if self._tariff_catalog_manager is not None and self._tariff_catalog_manager.refresh_due():
+            await self._tariff_catalog_manager.async_refresh()
+            self.notify_update()
         async with self._operation_lock:
             try:
                 await self._async_tick_impl(*_args)
@@ -2007,6 +2191,12 @@ class DeyeEnergyManagerRuntime:
                 raise
 
     async def async_start(self) -> None:
+        self._tariff_catalog_manager = TariffCatalogManager(
+            self.hass,
+            self.entry_id,
+            str(self.data.get(CONF_TARIFF_CATALOG_URL, DEFAULT_TARIFF_CATALOG_URL)),
+        )
+        await self._tariff_catalog_manager.async_load()
         await self.async_load_sales_stats()
         await self.async_load_ai_data()
         await self.async_load_solcast_history()
@@ -2017,6 +2207,8 @@ class DeyeEnergyManagerRuntime:
         await self.async_update_energy_sample()
         await self.async_update_weather_forecast()
         self.unsub_timer = async_track_time_interval(self.hass, self.async_tick, timedelta(minutes=1))
+        if self._tariff_catalog_manager.refresh_due():
+            self.hass.async_create_task(self.async_refresh_tariff_catalog())
 
     async def async_unload(self) -> None:
         if self.unsub_timer:

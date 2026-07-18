@@ -34,6 +34,9 @@ CONF_TARIFF_PLAN = "tariff_plan"
 CONF_DISTRIBUTION_PEAK_RATE = "distribution_peak_rate"
 CONF_DISTRIBUTION_OFFPEAK_RATE = "distribution_offpeak_rate"
 CONF_CUSTOM_OFFPEAK_WINDOWS = "custom_offpeak_windows"
+CONF_TARIFF_MODE = "tariff_mode"
+CONF_PRICE_INCLUDES_DISTRIBUTION = "price_includes_distribution"
+CONF_TARIFF_CATALOG_URL = "tariff_catalog_url"
 CONF_GRID_POSITIVE_IS_IMPORT = "grid_positive_is_import"
 CONF_BATTERY_POSITIVE_IS_DISCHARGE = "battery_positive_is_discharge"
 CONF_MAPPING_MODE = "mapping_mode"
@@ -71,13 +74,16 @@ DEFAULT_TARIFF_PLAN = "g11"
 DEFAULT_DISTRIBUTION_PEAK_RATE = 0.0
 DEFAULT_DISTRIBUTION_OFFPEAK_RATE = 0.0
 DEFAULT_CUSTOM_OFFPEAK_WINDOWS = "13:00-15:00,22:00-06:00"
+DEFAULT_TARIFF_MODE = "automatic"
+DEFAULT_PRICE_INCLUDES_DISTRIBUTION = False
+DEFAULT_TARIFF_CATALOG_URL = "https://raw.githubusercontent.com/pasierbrg/deye-energy-manager-0.7.1-main/main/custom_components/deye_energy_manager/tariff_catalog.json"
 DEFAULT_GRID_POSITIVE_IS_IMPORT = True
 DEFAULT_BATTERY_POSITIVE_IS_DISCHARGE = True
 DEFAULT_MAPPING_MODE = "automatic"
 
 PRICE_SOURCES = ["pstryk", "pse_rce", "other", "none"]
 OSD_PROVIDERS = ["pge", "tauron", "enea", "energa", "stoen", "other"]
-TARIFF_PLANS = ["g11", "g12", "g12w", "g12e", "custom"]
+TARIFF_PLANS = ["g11", "g11f", "g11p", "g11pewna", "g12", "g12w", "g12e", "g12n", "g12r", "g12p", "g12as", "g12sezon", "g12eko", "g13", "g13s", "g13active", "g14dynamic", "custom"]
 
 MODE_SELLING_FIRST = "Selling First"
 MODE_ZERO_EXPORT = "Zero Export To Load"

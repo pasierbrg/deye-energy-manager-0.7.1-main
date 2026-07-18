@@ -131,3 +131,15 @@ apply_schedule_patch:
       selector:
         text:
           multiline: true
+save_tariff_settings:
+  name: Zapisz ustawienia taryfy i dystrybucji
+  description: Waliduje i zapisuje ustawienia operatora OSD, taryfy, źródła cen i znaków przepływu przekazane przez kartę.
+  fields:
+    data:
+      required: true
+      selector:
+        text:
+          multiline: true
+refresh_tariff_catalog:
+  name: Odśwież katalog taryf OSD
+  description: Sprawdza wersjonowany katalog taryf. W razie błędu zachowuje ostatnią poprawną lub wbudowaną wersję.

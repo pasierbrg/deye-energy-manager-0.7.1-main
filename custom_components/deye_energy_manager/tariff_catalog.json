@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "catalog_version": "2026.07.18.1",
+  "generated_at": "2026-07-18T00:00:00+02:00",
+  "effective_from": "2026-02-01",
+  "currency": "PLN",
+  "vat_included": true,
+  "common_variable_fees": {
+    "quality": 0.0408,
+    "oze": 0.00898,
+    "cogeneration": 0.00369
+  },
+  "providers": {
+    "pge": {
+      "name": "PGE Dystrybucja",
+      "source": "https://pgedystrybucja.pl/strona-glowna/komunikaty/taryfa-2026",
+      "tariffs": {
+        "g11": {"name": "G11 — całodobowa", "rates": {"all_day": 0.4267}, "all_day_zone": "all_day"},
+        "g12": {"name": "G12 — dwustrefowa", "rates": {"peak": 0.4937, "offpeak": 0.0941}, "default_zone": "peak", "seasons": {"summer": {"months": [4,5,6,7,8,9], "zones": {"offpeak": [[15,17],[22,6]]}}, "winter": {"months": [1,2,3,10,11,12], "zones": {"offpeak": [[13,15],[22,6]]}}}},
+        "g12w": {"name": "G12w — weekendowa", "rates": {"peak": 0.5259, "offpeak": 0.1039}, "default_zone": "peak", "weekend_zone": "offpeak", "holiday_zone": "offpeak", "seasons": {"summer": {"months": [4,5,6,7,8,9], "zones": {"offpeak": [[15,17],[22,6]]}}, "winter": {"months": [1,2,3,10,11,12], "zones": {"offpeak": [[13,15],[22,6]]}}}},
+        "g12n": {"name": "G12n — niedzielna", "rates": {"peak": 0.4268, "offpeak": 0.0429}, "default_zone": "offpeak", "weekday_zone": "peak", "weekday_windows": [[5,1]], "saturday_zone": "peak", "saturday_windows": [[5,1]], "holiday_zone": "offpeak"},
+        "g12as": {"name": "G12as — antysmogowa", "rates": {"peak": 0.4267, "offpeak": 0.0427}, "default_zone": "peak", "zones": {"offpeak": [[22,6]]}, "conditional_rate": true},
+        "g12e": {"name": "G12e — elastyczna", "rates": {"peak": 0.4737, "offpeak": 0.0601}, "default_zone": "peak", "weekend_zone": "offpeak", "holiday_zone": "offpeak", "seasons": {"summer": {"months": [4,5,6,7,8,9], "zones": {"offpeak": [[15,17],[22,6]]}}, "winter": {"months": [1,2,3,10,11,12], "zones": {"offpeak": [[13,15],[22,6]]}}}, "requires_area_confirmation": true}
+      }
+    },
+    "tauron": {
+      "name": "TAURON Dystrybucja",
+      "source": "https://www.tauron-dystrybucja.pl/uslugi-dystrybucyjne/dokumenty-do-pobrania",
+      "tariffs": {
+        "g11": {"name": "G11 — całodobowa", "rates": {"all_day": 0.3031}, "all_day_zone": "all_day"},
+        "g12": {"name": "G12 — dwustrefowa", "rates": {"peak": 0.3494, "offpeak": 0.0686}, "default_zone": "peak", "zones": {"offpeak": [[13,15],[22,6]]}},
+        "g12w": {"name": "G12w — weekendowa", "rates": {"peak": 0.4057, "offpeak": 0.0630}, "default_zone": "peak", "weekend_zone": "offpeak", "holiday_zone": "offpeak", "zones": {"offpeak": [[13,15],[22,6]]}},
+        "g12as": {"name": "G12as — antysmogowa", "rates": {"peak": 0.3031, "offpeak": 0.0303}, "default_zone": "peak", "zones": {"offpeak": [[22,6]]}, "conditional_rate": true},
+        "g13": {"name": "G13 — trzystrefowa", "rates": {"morning_peak": 0.2710, "afternoon_peak": 0.4795, "offpeak": 0.0482}, "default_zone": "offpeak", "weekend_zone": "offpeak", "holiday_zone": "offpeak", "seasons": {"summer": {"months": [4,5,6,7,8,9], "zones": {"morning_peak": [[7,13]], "afternoon_peak": [[19,22]]}}, "winter": {"months": [1,2,3,10,11,12], "zones": {"morning_peak": [[7,13]], "afternoon_peak": [[16,21]]}}}},
+        "g13s": {"name": "G13s — trzystrefowa sezonowa", "rates": {"day_offpeak": 0.1230, "day_peak": 0.3496, "night": 0.1346}, "default_zone": "night", "seasons": {"summer": {"months": [4,5,6,7,8,9], "zones": {"day_offpeak": [[9,17]], "day_peak": [[7,9],[17,21]]}}, "winter": {"months": [1,2,3,10,11,12], "rates": {"day_offpeak": 0.2459, "day_peak": 0.4098, "night": 0.1346}, "zones": {"day_offpeak": [[10,15]], "day_peak": [[7,10],[15,21]]}}}, "weekend_rates": {"summer": {"day_offpeak": 0.0492, "day_peak": 0.1446, "night": 0.1346}, "winter": {"day_offpeak": 0.1476, "day_peak": 0.2411, "night": 0.1346}}},
+        "g14dynamic": {"name": "G14dynamic — dynamiczna", "rates": {"s1": 0.0276, "s2": 0.1098, "s3": 0.4774, "s4": 2.9220}, "dynamic_source": "pse_energy_compass", "requires_dynamic_signal": true}
+      }
+    },
+    "enea": {
+      "name": "Enea Operator",
+      "source": "https://www.operator.enea.pl/uslugi-dystrybucyjne/taryfy-i-cenniki",
+      "tariffs": {
+        "g11": {"name": "G11 — całodobowa", "rates": {"all_day": 0.3021}, "all_day_zone": "all_day"},
+        "g12": {"name": "G12 — dwustrefowa", "rates": {"peak": 0.3418, "offpeak": 0.1123}, "default_zone": "peak", "zones": {"offpeak": [[13,15],[22,6]]}},
+        "g12w": {"name": "G12w — weekendowa", "rates": {"peak": 0.3323, "offpeak": 0.1000}, "default_zone": "peak", "weekend_zone": "offpeak", "holiday_zone": "offpeak", "zones": {"offpeak": [[21,6]]}},
+        "g12as": {"name": "G12as — antysmogowa", "rates": {"peak": 0.3021, "offpeak": 0.0303}, "default_zone": "peak", "zones": {"offpeak": [[22,6]]}, "conditional_rate": true},
+        "g11pewna": {"name": "G11pewna", "rates": {"all_day": 0.3021}, "all_day_zone": "all_day", "conditional_rate": true},
+        "g11p": {"name": "G11p — przedpłatowa", "rates": {"all_day": 0.3021}, "all_day_zone": "all_day"},
+        "g12p": {"name": "G12p — przedpłatowa", "rates": {"peak": 0.3418, "offpeak": 0.1123}, "default_zone": "peak", "zones": {"offpeak": [[13,15],[22,6]]}},
+        "g12sezon": {"name": "G12sezON — sezonowa", "rates": {"other": 0.3418, "recommended": 0.1123}, "default_zone": "other", "seasons": {"summer": {"months": [4,5,6,7,8,9], "zones": {"recommended": [[4,6],[9,17]]}}, "winter": {"months": [1,2,3,10,11,12], "zones": {"recommended": [[22,6],[11,13]]}}}},
+        "g13active": {"name": "G13active — aktywna", "rates": {"recommended": 0.0898, "normal": 0.3021, "restriction": 0.3729}, "default_zone": "normal", "month_zones": {"1": {"recommended": [[23,6]], "restriction": [[7,10],[15,20]]}, "2": {"recommended": [[23,6]], "restriction": [[7,9],[16,21]]}, "3": {"recommended": [[10,16]], "restriction": [[6,9],[16,23]]}, "4": {"recommended": [[10,16]], "restriction": [[6,9],[18,23]]}, "5": {"recommended": [[9,17]], "restriction": [[6,9],[18,23]]}, "6": {"recommended": [[9,17]], "restriction": [[6,9],[18,23]]}, "7": {"recommended": [[9,17]], "restriction": [[6,9],[18,23]]}, "8": {"recommended": [[9,17]], "restriction": [[6,9],[18,23]]}, "9": {"recommended": [[10,16]], "restriction": [[6,9],[17,23]]}, "10": {"recommended": [[10,16]], "restriction": [[7,9],[16,23]]}, "11": {"recommended": [[23,6]], "restriction": [[7,9],[14,21]]}, "12": {"recommended": [[23,6]], "restriction": [[7,10],[13,20]]}}}
+      }
+    },
+    "energa": {
+      "name": "Energa-Operator",
+      "source": "https://energa-operator.pl/uslugi/oplaty-i-faktury/taryfa",
+      "tariffs": {
+        "g11": {"name": "G11 — całodobowa", "rates": {"all_day": 0.4287}, "all_day_zone": "all_day"},
+        "g11f": {"name": "G11f — stała niska stawka", "rates": {"all_day": 0.0635}, "all_day_zone": "all_day", "requires_meter_confirmation": true},
+        "g12": {"name": "G12 — dwustrefowa", "rates": {"peak": 0.4728, "offpeak": 0.1017}, "default_zone": "peak", "zones": {"offpeak": [[13,15],[22,6]]}},
+        "g12w": {"name": "G12w — weekendowa", "rates": {"peak": 0.4941, "offpeak": 0.1047}, "default_zone": "peak", "weekend_zone": "offpeak", "holiday_zone": "offpeak", "zones": {"offpeak": [[13,15],[22,6]]}},
+        "g12r": {"name": "G12r — rozszerzona", "rates": {"peak": 0.4477, "offpeak": 0.1081}, "default_zone": "peak", "zones": {"offpeak": [[13,16],[22,7]]}},
+        "g12as": {"name": "G12as — antysmogowa", "rates": {"peak": 0.4287, "offpeak": 0.0415}, "default_zone": "peak", "zones": {"offpeak": [[22,6]]}, "conditional_rate": true}
+      }
+    },
+    "stoen": {
+      "name": "Stoen Operator",
+      "source": "https://www.stoen.pl/plik/wyciag-z-taryfy-dla-dystrybucji-energii-elektrycznej-dla-odbiorcow-z-grupa-taryfowa-g-obowiazuje-od-1-01-2024-r",
+      "tariffs": {
+        "g11": {"name": "G11 — całodobowa", "rates": {"all_day": 0.2881}, "all_day_zone": "all_day"},
+        "g12": {"name": "G12 — dwustrefowa", "rates": {"peak": 0.3130, "offpeak": 0.0683}, "default_zone": "peak", "zones": {"offpeak": [[13,15],[22,6]]}},
+        "g12w": {"name": "G12w — weekendowa", "rates": {"peak": 0.3161, "offpeak": 0.1327}, "default_zone": "peak", "weekend_zone": "offpeak", "holiday_zone": "offpeak", "zones": {"offpeak": [[22,6]]}},
+        "g12as": {"name": "G12as — antysmogowa", "rates": {"peak": 0.2881, "offpeak": 0.0833}, "default_zone": "peak", "zones": {"offpeak": [[22,6]]}, "conditional_rate": true},
+        "g12eko": {"name": "G12eko — elastyczna", "rates": {"recommended": 0.2016, "other": 0.3477}, "default_zone": "other", "month_zones": {"1": {"recommended": [[23,6]]}, "2": {"recommended": [[23,6]]}, "3": {"recommended": [[10,16]]}, "4": {"recommended": [[10,16]]}, "5": {"recommended": [[9,17]]}, "6": {"recommended": [[9,17]]}, "7": {"recommended": [[9,17]]}, "8": {"recommended": [[9,17]]}, "9": {"recommended": [[10,16]]}, "10": {"recommended": [[10,16]]}, "11": {"recommended": [[23,6]]}, "12": {"recommended": [[23,6]]}}, "effective_from": "2026-10-01"}
+      }
+    },
+    "other": {
+      "name": "Inny operator / profil ręczny",
+      "source": "manual",
+      "tariffs": {
+        "custom": {"name": "Profil własny", "rates": {"peak": 0.0, "offpeak": 0.0}, "default_zone": "peak", "zones": {"offpeak": [[13,15],[22,6]]}}
+      }
+    }
+  }
+}

@@ -42,6 +42,9 @@ SLOT_GRID_CHARGE_SCHEMA = vol.Schema(
 SCHEDULE_PATCH_SCHEMA = vol.Schema(
     {vol.Required("data"): vol.All(cv.string, vol.Length(max=100000))}
 )
+TARIFF_SETTINGS_SCHEMA = vol.Schema(
+    {vol.Required("data"): vol.All(cv.string, vol.Length(max=50000))}
+)
 SERVICE_NAMES = (
     "apply_settings",
     "manual_sell",
@@ -56,6 +59,8 @@ SERVICE_NAMES = (
     "clear_history",
     "set_slot_grid_charge",
     "apply_schedule_patch",
+    "save_tariff_settings",
+    "refresh_tariff_catalog",
 )
 _STATIC_PATH_REGISTERED = False
 
@@ -146,6 +151,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             raise ValueError("Schedule patch must be a JSON list")
         await runtime.async_apply_schedule_patch(updates)
 
+    async def handle_save_tariff_settings(call: ServiceCall) -> None:
+        settings = json.loads(call.data["data"])
+        normalized = await runtime.async_update_tariff_settings(settings)
+        hass.config_entries.async_update_entry(
+            entry,
+            options={**entry.options, **normalized},
+        )
+
+    async def handle_refresh_tariff_catalog(call: ServiceCall) -> None:
+        await runtime.async_refresh_tariff_catalog()
+
     hass.services.async_register(DOMAIN, "apply_settings", handle_apply_settings, schema=APPLY_SCHEMA)
     hass.services.async_register(DOMAIN, "manual_sell", handle_manual_sell, schema=MANUAL_SELL_SCHEMA)
     hass.services.async_register(DOMAIN, "charge_now", handle_charge_now, schema=CHARGE_SCHEMA)
@@ -168,6 +184,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "apply_schedule_patch",
         handle_apply_schedule_patch,
         schema=SCHEDULE_PATCH_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        "save_tariff_settings",
+        handle_save_tariff_settings,
+        schema=TARIFF_SETTINGS_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        "refresh_tariff_catalog",
+        handle_refresh_tariff_catalog,
     )
     return True
 

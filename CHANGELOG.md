@@ -34,16 +34,18 @@
 - Trafność pokazuje średnią, ostatni zamknięty dzień i liczbę dni, a korekta historyczna jest ograniczana do bezpiecznego zakresu.
 - Dodano próbki pięciominutowe z jawnym oznaczeniem brakujących danych oraz archiwa 90 dni / 24 miesiące / 5 lat / miesięczne bez limitu.
 - Dodano pomocniczą prognozę godzinową `weather.*`, domyślnie `weather.forecast_home_2`.
-- Dodano profile PGE, Tauron, Enea, Energa, Stoen i własny oraz taryfy G11, G12, G12w, G12e i własną.
-- Profile taryfowe uwzględniają weekendy i polskie święta, a AI porównuje pełną cenę zakupu z dystrybucją.
+- Dodano wersjonowany katalog profili PGE, Tauron, Enea, Energa i Stoen, obejmujący dostępne taryfy gospodarstw domowych oraz profil własny.
+- Katalog jest sprawdzany przy starcie i co 7 dni, walidowany przed zapisaniem oraz przechowywany jako ostatnia poprawna kopia; dostępne są też ręczne odświeżenie i ręczne stawki awaryjne.
+- Profile taryfowe uwzględniają strefy godzinowe, zmiany sezonowe, weekendy i polskie święta, a AI porównuje pełną cenę zakupu z dystrybucją dla dziś i jutra.
+- Próbki uczenia są oznaczane operatorem, taryfą, strefą, rodzajem dnia, sezonem i wersją katalogu.
 - Dodano konfigurację kierunku znaku mocy sieci i baterii.
-- Options Flow przebudowano na pięcioetapowy kreator z polskimi nazwami, instrukcjami, podpowiedziami automatycznymi i końcową walidacją.
+- Options Flow przebudowano na pięcioetapowy kreator mapujący wyłącznie encje, z polskimi nazwami, instrukcjami, podpowiedziami automatycznymi i końcową walidacją.
 
 ### Karta i UX
 
 - Poprawiono zabezpieczanie dynamicznych wartości HTML.
 - Usunięto błędnie wyświetlane encje numeryczne HTML, m.in. w nazwie strategii „Zrównoważony”.
-- Dodano zakładkę `Taryfa i dystrybucja` z profilem 24h.
+- Dodano zakładkę `Taryfa i dystrybucja` z wyborem operatora, taryfy i trybu katalogu, jawnym przyciskiem zapisu, diagnostyką aktualizacji oraz profilem 48h dla dziś i jutra.
 - Sensory proxy reagują na zdarzenia źródłowych encji, a karta grupuje aktualizacje w jednej klatce animacji i nie przelicza ciężkich wykresów przy każdej zmianie mocy.
 - Zmienione wartości są krótko sygnalizowane wizualnie bez tworzenia sztucznych odczytów.
 - Uporządkowano działanie ustawień inteligentnego optymalizatora.
