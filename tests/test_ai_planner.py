@@ -42,6 +42,10 @@ def base_inputs():
         "distribution": [0.1] * 48,
         "price_includes_distribution": False,
         "pv_forecast": [24, 18],
+        "pv_forecast_full": [30, 18],
+        "pv_forecast_available": [True, True],
+        "forecast_correction": 0.9,
+        "forecast_accuracy": 82,
         "pv_profile": pv_shape,
         "load_profile": [0.5] * 24,
         "weather_factors": [1.0] * 48,
@@ -110,6 +114,27 @@ class AiPlannerTests(unittest.TestCase):
                     ranges += 1
                     previous = row["action"]
             self.assertLessEqual(ranges, 6)
+
+    def test_chart_series_preserve_solcast_correction_and_interval(self):
+        result = planner.build_energy_plan(base_inputs(), "balanced")
+        self.assertEqual(48, len(result["rows"]))
+        for row in result["rows"]:
+            self.assertIn("solcast_kwh", row)
+            self.assertIn("corrected_pv_kwh", row)
+            self.assertIn("forecast_low_kwh", row)
+            self.assertIn("forecast_high_kwh", row)
+            self.assertLessEqual(row["forecast_low_kwh"], row["corrected_pv_kwh"])
+            self.assertGreaterEqual(row["forecast_high_kwh"], row["corrected_pv_kwh"])
+        self.assertAlmostEqual(30, sum(row["solcast_kwh"] for row in result["rows"][:24]), places=2)
+
+    def test_missing_solcast_is_not_rendered_as_zero_forecast(self):
+        values = base_inputs()
+        values["pv_forecast_available"] = [True, False]
+        result = planner.build_energy_plan(values, "balanced")
+        tomorrow = [row for row in result["rows"] if row["day"] == "tomorrow"]
+        self.assertTrue(all(row["solcast_kwh"] is None for row in tomorrow))
+        self.assertTrue(all(row["corrected_pv_kwh"] is None for row in tomorrow))
+        self.assertTrue(all(row["forecast_low_kwh"] is None and row["forecast_high_kwh"] is None for row in tomorrow))
 
 
 if __name__ == "__main__":

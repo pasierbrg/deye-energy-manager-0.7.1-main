@@ -170,7 +170,9 @@ class DeyeEnergyManagerRuntime:
     daily_archive: list[dict[str, Any]] = field(default_factory=list)
     monthly_archive: list[dict[str, Any]] = field(default_factory=list)
     weather_forecast: list[dict[str, Any]] = field(default_factory=list)
+    weather_daily_forecast: list[dict[str, Any]] = field(default_factory=list)
     weather_last_updated: str = ""
+    weather_last_error: str = ""
     _last_energy_sample_at: datetime | None = None
     slots: dict[str, SlotSettings] = field(default_factory=dict)
     last_action: str = "Idle"
@@ -527,11 +529,26 @@ class DeyeEnergyManagerRuntime:
             "available": state is not None and state.state not in ("unknown", "unavailable"),
             "condition": state.state if state is not None else "unavailable",
             "temperature": attrs.get("temperature"),
+            "temperature_unit": attrs.get("temperature_unit"),
+            "pressure": attrs.get("pressure"),
+            "pressure_unit": attrs.get("pressure_unit"),
+            "humidity": attrs.get("humidity"),
+            "wind_speed": attrs.get("wind_speed"),
+            "wind_speed_unit": attrs.get("wind_speed_unit"),
+            "wind_bearing": attrs.get("wind_bearing"),
+            "wind_gust_speed": attrs.get("wind_gust_speed"),
+            "visibility": attrs.get("visibility"),
+            "visibility_unit": attrs.get("visibility_unit"),
             "cloud_coverage": attrs.get("cloud_coverage"),
             "precipitation_probability": attrs.get("precipitation_probability"),
+            "precipitation_unit": attrs.get("precipitation_unit"),
             "risk_factor": round(risk_factor, 3),
             "forecast": self.weather_forecast[:48],
+            "daily_forecast": self.weather_daily_forecast[:7],
+            "hourly_count": len(self.weather_forecast[:48]),
+            "daily_count": len(self.weather_daily_forecast[:7]),
             "last_updated": self.weather_last_updated,
+            "last_error": self.weather_last_error,
         }
 
     @staticmethod
@@ -703,6 +720,13 @@ class DeyeEnergyManagerRuntime:
             "distribution": distribution,
             "price_includes_distribution": self.price_includes_distribution,
             "pv_forecast": [remaining, max(0, self.state_float(self.solcast_forecast_tomorrow_sensor, 0))],
+            "pv_forecast_full": [today_forecast, max(0, self.state_float(self.solcast_forecast_tomorrow_sensor, 0))],
+            "pv_forecast_available": [
+                self.entity_available(self.solcast_forecast_today_sensor),
+                self.entity_available(self.solcast_forecast_tomorrow_sensor),
+            ],
+            "forecast_correction": self.safe_float(learning.get("solcast_correction_factor"), 1),
+            "forecast_accuracy": learning.get("solcast_accuracy_avg"),
             "pv_profile": [self.safe_float(by_hour.get(hour, {}).get("pv_kwh"), 0) for hour in range(24)],
             "load_profile": [self.safe_float(by_hour.get(hour, {}).get("load_kwh"), 0) for hour in range(24)],
             "weather_factors": self._weather_factors_48h(),
@@ -1315,26 +1339,88 @@ class DeyeEnergyManagerRuntime:
         entity_id = self.weather_entity
         if not entity_id or not self.entity_available(entity_id):
             self.weather_forecast = []
-            self.weather_last_updated = ha_now().isoformat(timespec="seconds")
+            self.weather_daily_forecast = []
+            self.weather_last_error = "Encja pogody jest niedostępna"
             return
-        try:
+
+        async def fetch_forecast(kind: str) -> list[dict[str, Any]]:
             response = await self.hass.services.async_call(
                 "weather",
                 "get_forecasts",
-                {"type": "hourly"},
+                {"type": kind},
                 target={"entity_id": entity_id},
                 blocking=True,
                 return_response=True,
             )
             payload = response.get(entity_id, response) if isinstance(response, dict) else {}
             forecast = payload.get("forecast", []) if isinstance(payload, dict) else []
-            self.weather_forecast = forecast[:48] if isinstance(forecast, list) else []
-        except Exception:  # Weather is optional and must never block inverter safety logic.
-            # Older HA versions or test doubles may not expose response-enabled services.
+            return [row for row in forecast if isinstance(row, dict)] if isinstance(forecast, list) else []
+
+        errors: list[str] = []
+        hourly: list[dict[str, Any]] = []
+        daily: list[dict[str, Any]] = []
+        try:
+            hourly = await fetch_forecast("hourly")
+        except Exception as err:  # Weather is optional and must never block inverter safety logic.
+            errors.append(f"godzinowa: {err}")
+        try:
+            daily = await fetch_forecast("daily")
+        except Exception as err:
+            errors.append(f"dzienna: {err}")
+
+        # Compatibility fallback for older weather entities exposing forecast as an attribute.
+        if not hourly:
             state = self.hass.states.get(entity_id)
-            forecast = state.attributes.get("forecast", []) if state is not None else []
-            self.weather_forecast = forecast[:48] if isinstance(forecast, list) else []
-        self.weather_last_updated = ha_now().isoformat(timespec="seconds")
+            fallback = state.attributes.get("forecast", []) if state is not None else []
+            hourly = [row for row in fallback if isinstance(row, dict)] if isinstance(fallback, list) else []
+
+        # Some providers implement only the hourly endpoint. Build a truthful
+        # daily summary from those samples instead of displaying invented zeros.
+        if not daily and hourly:
+            grouped: dict[str, list[dict[str, Any]]] = {}
+            local_now = ha_now()
+            for row in hourly:
+                raw_time = row.get("datetime", row.get("time"))
+                try:
+                    stamp = datetime.fromisoformat(str(raw_time).replace("Z", "+00:00"))
+                    if local_now.tzinfo is not None and stamp.tzinfo is not None:
+                        stamp = stamp.astimezone(local_now.tzinfo)
+                    day_key = stamp.date().isoformat()
+                except (TypeError, ValueError):
+                    continue
+                grouped.setdefault(day_key, []).append(row)
+            for day_key, rows in sorted(grouped.items())[:7]:
+                temperatures = [
+                    self.safe_float(row.get("temperature"), float("nan"))
+                    for row in rows
+                    if row.get("temperature") is not None
+                ]
+                temperatures = [value for value in temperatures if value == value]
+                condition_counts: dict[str, int] = {}
+                for row in rows:
+                    condition = str(row.get("condition") or "")
+                    if condition:
+                        condition_counts[condition] = condition_counts.get(condition, 0) + 1
+                condition = max(condition_counts, key=condition_counts.get) if condition_counts else None
+                probabilities = [
+                    self.safe_float(row.get("precipitation_probability"), 0)
+                    for row in rows
+                    if row.get("precipitation_probability") is not None
+                ]
+                daily.append({
+                    "datetime": day_key,
+                    "condition": condition,
+                    "temperature": max(temperatures) if temperatures else None,
+                    "templow": min(temperatures) if temperatures else None,
+                    "precipitation_probability": max(probabilities) if probabilities else None,
+                    "derived_from_hourly": True,
+                })
+
+        self.weather_forecast = hourly[:48]
+        self.weather_daily_forecast = daily[:7]
+        self.weather_last_error = "; ".join(errors)
+        if hourly or daily:
+            self.weather_last_updated = ha_now().isoformat(timespec="seconds")
 
     def _new_learning_hour(self, hour_key: str, now: datetime) -> dict[str, Any]:
         tariff = self.tariff_context(now)

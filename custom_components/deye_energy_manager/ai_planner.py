@@ -140,7 +140,13 @@ def build_energy_plan(inputs: dict[str, Any], strategy: str = "balanced") -> dic
     load_shape = _profile24(inputs.get("load_profile"))
     pv_shape, learned_pv_shape = _normalised_shape(_profile24(inputs.get("pv_profile")), True)
     pv_forecast = inputs.get("pv_forecast") if isinstance(inputs.get("pv_forecast"), list) else [0, 0]
+    pv_forecast_full = inputs.get("pv_forecast_full") if isinstance(inputs.get("pv_forecast_full"), list) else pv_forecast
+    forecast_availability = inputs.get("pv_forecast_available") if isinstance(inputs.get("pv_forecast_available"), list) else [True, True]
     weather = inputs.get("weather_factors") if isinstance(inputs.get("weather_factors"), list) else []
+    historical_correction = max(0.5, min(1.5, _number(inputs.get("forecast_correction"), 1)))
+    historical_accuracy = inputs.get("forecast_accuracy")
+    accuracy_value = _number(historical_accuracy, -1)
+    forecast_error = max(0.08, min(0.35, (100 - accuracy_value) / 100)) if accuracy_value >= 0 else 0.25
     hourly_load = [
         0.0 if day_index == 0 and hour < current_hour else max(0.0, load_shape[hour])
         for day_index in range(2) for hour in range(24)
@@ -158,6 +164,32 @@ def build_energy_plan(inputs: dict[str, Any], strategy: str = "balanced") -> dic
             factor = 1.0 if factor_raw is None else max(0.65, min(1.05, _number(factor_raw, 1)))
             value = total * active_shape[hour] / active_total * factor
             hourly_pv.append(max(0.0, value))
+
+    # Separate chart series preserve the original Solcast curve and the corrected
+    # curve.  The operational simulation above still uses only remaining energy
+    # for the current day, so past hours cannot consume the current SOC twice.
+    hourly_solcast: list[float | None] = []
+    hourly_corrected: list[float | None] = []
+    forecast_low: list[float | None] = []
+    forecast_high: list[float | None] = []
+    for day_index in range(2):
+        full_total = max(0.0, _number(pv_forecast_full[day_index] if day_index < len(pv_forecast_full) else 0))
+        for hour in range(24):
+            index = day_index * 24 + hour
+            if day_index >= len(forecast_availability) or not forecast_availability[day_index]:
+                hourly_solcast.append(None)
+                hourly_corrected.append(None)
+                forecast_low.append(None)
+                forecast_high.append(None)
+                continue
+            raw = full_total * pv_shape[hour]
+            factor_raw = weather[index] if index < len(weather) else None
+            weather_factor = 1.0 if factor_raw is None else max(0.65, min(1.05, _number(factor_raw, 1)))
+            corrected = max(0.0, raw * historical_correction * weather_factor)
+            hourly_solcast.append(raw)
+            hourly_corrected.append(corrected)
+            forecast_low.append(max(0.0, corrected * (1 - forecast_error)))
+            forecast_high.append(corrected * (1 + forecast_error))
 
     # Select compact contiguous windows so Deye's six-range constraint remains tractable.
     sell_hours: list[set[int]] = [set(), set()]
@@ -231,6 +263,10 @@ def build_energy_plan(inputs: dict[str, Any], strategy: str = "balanced") -> dic
                 "mode": mode,
                 "proposed": action != "none",
                 "pv_kwh": round(pv, 3),
+                "solcast_kwh": round(hourly_solcast[idx], 3) if hourly_solcast[idx] is not None else None,
+                "corrected_pv_kwh": round(hourly_corrected[idx], 3) if hourly_corrected[idx] is not None else None,
+                "forecast_low_kwh": round(forecast_low[idx], 3) if forecast_low[idx] is not None else None,
+                "forecast_high_kwh": round(forecast_high[idx], 3) if forecast_high[idx] is not None else None,
                 "load_kwh": round(load, 3),
                 "sell_price": sell_prices[day_index].get(hour),
                 "buy_price": buy_prices[day_index].get(hour),

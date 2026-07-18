@@ -97,13 +97,20 @@ class FrontendDefaultRestoreTests(unittest.TestCase):
             "Pełne 24h",
             "save_future_plan",
             "cancel_future_plan",
+            "Produkcja rzeczywista",
+            "Prognoza Solcast",
+            "Prognoza skorygowana",
+            "Przedział prognozy",
+            "data-ai-chart-point",
+            "data-ai-weather-mode",
         ):
             self.assertIn(required, source)
+        self.assertNotIn(">P50<", source)
 
     def test_documentation_uses_current_card_cache_revision(self):
         for name in ("README.md", "INSTALL_PL.md"):
             source = (ROOT / name).read_text(encoding="utf-8")
-            self.assertIn("deye-energy-manager-card.js?v=0763", source)
+            self.assertIn("deye-energy-manager-card.js?v=0764", source)
             self.assertNotIn("deye-energy-manager-card.js?v=076\n", source)
 
 
