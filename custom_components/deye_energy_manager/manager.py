@@ -95,6 +95,7 @@ from .const import (
     DEFAULT_BATTERY_POSITIVE_IS_DISCHARGE,
 )
 from .tariff_catalog import TariffCatalogManager
+from .ai_planner import build_plan_bundle
 from .tariffs import (
     PROVIDER_LABELS,
     TARIFF_LABELS,
@@ -160,6 +161,7 @@ class DeyeEnergyManagerRuntime:
     sales_stats: dict[str, Any] = field(default_factory=dict)
     ai_settings: dict[str, Any] = field(default_factory=dict)
     ai_history: list[dict[str, Any]] = field(default_factory=list)
+    future_plan: dict[str, Any] = field(default_factory=dict)
     solcast_history: list[dict[str, Any]] = field(default_factory=list)
     solcast_tracking: dict[str, Any] = field(default_factory=dict)
     learning_history: list[dict[str, Any]] = field(default_factory=list)
@@ -528,9 +530,187 @@ class DeyeEnergyManagerRuntime:
             "cloud_coverage": attrs.get("cloud_coverage"),
             "precipitation_probability": attrs.get("precipitation_probability"),
             "risk_factor": round(risk_factor, 3),
-            "forecast": self.weather_forecast[:24],
+            "forecast": self.weather_forecast[:48],
             "last_updated": self.weather_last_updated,
         }
+
+    @staticmethod
+    def _price_from_object(item: Any) -> float | None:
+        if not isinstance(item, dict):
+            return None
+        for key in (
+            "price", "value", "state", "amount", "total", "net_price", "gross_price",
+            "energy_price", "unit_price", "price_with_tax", "pln_kwh", "pln_per_kwh",
+            "sell_price", "buy_price", "sprzedaz", "zakup", "cena", "pln", "rce",
+        ):
+            if key not in item:
+                continue
+            try:
+                value = float(item[key])
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(value) and value > 0:
+                return value
+        return None
+
+    @staticmethod
+    def _hour_from_value(value: Any, fallback: int | None = None) -> int | None:
+        if isinstance(value, (int, float)) and 0 <= int(value) <= 23:
+            return int(value)
+        text = str(value or "")
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            return parsed.hour
+        except (TypeError, ValueError):
+            pass
+        import re
+
+        match = re.search(r"(?:^|\D)(\d{1,2})(?::\d{2})?", text)
+        if match and 0 <= int(match.group(1)) <= 23:
+            return int(match.group(1))
+        return fallback if fallback is not None and 0 <= fallback <= 23 else None
+
+    def price_map(self, entity_id: str | None, allow_state_fallback: bool = True) -> dict[int, float]:
+        """Read common hourly-price attribute layouts used by Polish integrations."""
+        state = self.hass.states.get(entity_id) if entity_id else None
+        if state is None:
+            return {}
+        result: dict[int, float] = {}
+
+        def add(item: Any, fallback: int | None = None) -> None:
+            hour: int | None = fallback
+            value: float | None = None
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                hour = self._hour_from_value(item[0], fallback)
+                try:
+                    value = float(item[1])
+                except (TypeError, ValueError):
+                    value = None
+            elif isinstance(item, dict):
+                for key in (
+                    "hour", "start", "from", "time", "date", "datetime", "timestamp",
+                    "period", "label", "name", "start_time", "starts_at", "valid_from", "begin", "od",
+                ):
+                    if key in item:
+                        hour = self._hour_from_value(item[key], fallback)
+                        break
+                value = self._price_from_object(item)
+            else:
+                try:
+                    value = float(item)
+                except (TypeError, ValueError):
+                    value = None
+            if hour is not None and value is not None and math.isfinite(value) and value > 0:
+                result.setdefault(hour, value)
+
+        def parse(source: Any) -> None:
+            if isinstance(source, list):
+                for index, item in enumerate(source):
+                    add(item, index if index < 24 else None)
+            elif isinstance(source, dict):
+                for index, (key, value) in enumerate(source.items()):
+                    if isinstance(value, dict):
+                        add({**value, "hour": value.get("hour", key)}, index if index < 24 else None)
+                    else:
+                        add([key, value], index if index < 24 else None)
+
+        attrs = dict(state.attributes)
+        for key in (
+            "prices", "price", "today", "tomorrow", "hourly", "hours", "data", "values",
+            "items", "entries", "forecast", "raw_today", "raw_tomorrow", "source", "price_list",
+            "hourly_prices", "prices_today", "prices_tomorrow", "today_prices", "tomorrow_prices",
+            "sell_prices", "buy_prices", "ceny", "ceny_godzinowe", "energy_prices",
+        ):
+            parse(attrs.get(key))
+        if not result and allow_state_fallback:
+            for key, value in attrs.items():
+                if self._hour_from_value(key) is not None or isinstance(value, (list, dict)):
+                    parse({key: value})
+        if not result:
+            value = self.state_float_or_none(entity_id)
+            if value is not None and value > 0:
+                result[ha_now().hour] = value
+        return result
+
+    def _weather_factors_48h(self) -> list[float | None]:
+        factors: list[float | None] = [None] * 48
+        current = ha_now()
+        for fallback_index, row in enumerate(self.weather_forecast[:48]):
+            if not isinstance(row, dict):
+                continue
+            index: int | None = None
+            raw_time = row.get("datetime", row.get("time"))
+            if raw_time:
+                try:
+                    stamp = datetime.fromisoformat(str(raw_time).replace("Z", "+00:00"))
+                    if current.tzinfo is not None and stamp.tzinfo is not None:
+                        stamp = stamp.astimezone(current.tzinfo)
+                    day_offset = (stamp.date() - current.date()).days
+                    if 0 <= day_offset <= 1:
+                        index = day_offset * 24 + stamp.hour
+                except (TypeError, ValueError):
+                    index = None
+            if index is None:
+                stamp = current + timedelta(hours=fallback_index)
+                day_offset = (stamp.date() - current.date()).days
+                if 0 <= day_offset <= 1:
+                    index = day_offset * 24 + stamp.hour
+            if index is None or not 0 <= index < 48:
+                continue
+            cloud = self.safe_float(row.get("cloud_coverage"), 0)
+            precipitation = self.safe_float(row.get("precipitation_probability"), 0)
+            factors[index] = round(max(0.65, min(1.05, 1 - cloud * 0.002 - precipitation * 0.001)), 3)
+        return factors
+
+    def ai_plan_48h(self) -> dict[str, Any]:
+        """Build the read-only AI proposal payload exposed to the Lovelace card."""
+        settings = self.ai_settings
+        learning = self.learning_summary()
+        profile = learning.get("hourly_profile") if isinstance(learning.get("hourly_profile"), list) else []
+        by_hour = {int(str(row.get("hour", "0"))[:2]): row for row in profile if isinstance(row, dict)}
+        tariff = self.tariff_context()
+        distribution = [
+            self.safe_float(row.get("total_distribution_rate", row.get("rate")), 0)
+            for row in tariff.get("hourly_profile", [])[:48]
+            if isinstance(row, dict)
+        ]
+        distribution.extend([0.0] * (48 - len(distribution)))
+        today_forecast = self.solcast_forecast_today_value()
+        today_actual = max(0, self.state_float(self.daily_pv_production_sensor, 0))
+        remaining = max(0, self.state_float(self.solcast_remaining_today_sensor, 0))
+        if remaining <= 0:
+            remaining = max(0, today_forecast - today_actual)
+        selected_strategy = str(settings.get("strategy") or "balanced")
+        if selected_strategy == "autoconsumption":
+            selected_strategy = "safe"
+        payload = {
+            "date": ha_now().date().isoformat(),
+            "current_hour": ha_now().hour,
+            "soc": self.state_float(self.battery_soc_sensor, 0),
+            "battery_capacity_kwh": self.safe_float(settings.get("batteryCapacityKwh"), 10),
+            "battery_efficiency": self.safe_float(settings.get("batteryEfficiency"), 90) / 100,
+            "min_soc": self.safe_float(settings.get("minSoc"), 20),
+            "target_soc": self.safe_float(settings.get("targetSoc"), 100),
+            "reserve_kwh": self.safe_float(settings.get("reserveKwh"), 0),
+            "max_sell_power_w": self.safe_float(settings.get("maxSellPower"), 5000),
+            "charge_kwh_per_hour": max(0.25, self.safe_float(settings.get("batteryCapacityKwh"), 10) * 0.25),
+            "min_sell_price": self.safe_float(settings.get("minSellPrice"), 0),
+            "max_buy_price": self.safe_float(settings.get("maxBuyPrice"), 999),
+            "allow_battery_sell": bool(settings.get("allowBatterySell", True)),
+            "allow_grid_charge": bool(settings.get("allowGridCharge", True)),
+            "sell_prices": [self.price_map(self.price_sensor), self.price_map(self.sell_price_tomorrow_sensor, False)],
+            "buy_prices": [self.price_map(self.buy_price_today_sensor), self.price_map(self.buy_price_tomorrow_sensor, False)],
+            "distribution": distribution,
+            "price_includes_distribution": self.price_includes_distribution,
+            "pv_forecast": [remaining, max(0, self.state_float(self.solcast_forecast_tomorrow_sensor, 0))],
+            "pv_profile": [self.safe_float(by_hour.get(hour, {}).get("pv_kwh"), 0) for hour in range(24)],
+            "load_profile": [self.safe_float(by_hour.get(hour, {}).get("load_kwh"), 0) for hour in range(24)],
+            "weather_factors": self._weather_factors_48h(),
+            "recorded_days": learning.get("recorded_days", 0),
+        }
+        result = build_plan_bundle(payload, selected_strategy)
+        result["generated_at"] = ha_now().isoformat(timespec="seconds")
+        return result
 
     def register_entity(self, entity: Any) -> None:
         self.entities.append(entity)
@@ -739,12 +919,19 @@ class DeyeEnergyManagerRuntime:
         history = data.get("history")
         self.ai_settings = settings if isinstance(settings, dict) else {}
         self.ai_history = history[:365] if isinstance(history, list) else []
+        future_plan = data.get("future_plan")
+        self.future_plan = future_plan if isinstance(future_plan, dict) else {}
         self.last_saved_at = str(data.get("last_saved_at") or "")
 
     async def async_save_ai_data(self) -> None:
         if self._ai_store is None:
             return
-        await self._ai_store.async_save({"settings": self.ai_settings, "history": self.ai_history[:365], "last_saved_at": self.last_saved_at})
+        await self._ai_store.async_save({
+            "settings": self.ai_settings,
+            "history": self.ai_history[:365],
+            "future_plan": self.future_plan,
+            "last_saved_at": self.last_saved_at,
+        })
 
     async def async_set_ai_settings(self, settings: dict[str, Any]) -> None:
         self.ai_settings = dict(settings)
@@ -774,6 +961,139 @@ class DeyeEnergyManagerRuntime:
     async def async_clear_ai_history(self) -> None:
         self.ai_history = []
         await self.async_save_ai_data()
+        self.notify_update()
+
+    def _validate_future_plan_updates(self, updates: Any) -> list[dict[str, Any]]:
+        """Validate a dated AI plan without touching the live 24-hour schedule."""
+        if not isinstance(updates, list) or not updates:
+            raise ValueError("Plan na jutro nie zawiera wybranych godzin")
+        numeric_limits = {
+            "sell_power": (0.0, 13000.0),
+            "discharge_current": (0.0, 240.0),
+            "charge_current": (0.0, 240.0),
+            "grid_charge_current": (0.0, 240.0),
+            "min_soc": (0.0, 100.0),
+            "min_sell_price": (0.0, 5.0),
+        }
+        allowed = {"slot_key", "enabled", "charge_enabled", "mode", *numeric_limits}
+        normalized: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for raw in updates:
+            if not isinstance(raw, dict):
+                raise ValueError("Każda pozycja planu musi być obiektem")
+            unknown = set(raw) - allowed
+            if unknown:
+                raise ValueError(f"Nieobsługiwane pola planu: {', '.join(sorted(unknown))}")
+            slot_key = str(raw.get("slot_key") or "")
+            if slot_key not in self.slots or slot_key in seen:
+                raise ValueError(f"Nieprawidłowa lub powtórzona godzina planu: {slot_key}")
+            seen.add(slot_key)
+            item: dict[str, Any] = {"slot_key": slot_key}
+            if "enabled" in raw:
+                item["enabled"] = bool(raw["enabled"])
+            if "charge_enabled" in raw:
+                item["charge_enabled"] = bool(raw["charge_enabled"])
+            if "mode" in raw:
+                mode = str(raw["mode"])
+                if mode not in SLOT_MODES:
+                    raise ValueError(f"Nieobsługiwany tryb planu: {mode}")
+                item["mode"] = mode
+            for name, (minimum, maximum) in numeric_limits.items():
+                if name not in raw:
+                    continue
+                value = float(raw[name])
+                if not math.isfinite(value) or not minimum <= value <= maximum:
+                    raise ValueError(f"{name} musi mieścić się w zakresie {minimum:g}–{maximum:g}")
+                item[name] = value
+            normalized.append(item)
+        return normalized
+
+    async def async_save_future_plan(self, payload: dict[str, Any]) -> None:
+        """Persist an explicitly accepted plan for the next calendar day."""
+        if not isinstance(payload, dict):
+            raise ValueError("Plan na jutro musi być obiektem")
+        expected_date = (ha_now().date() + timedelta(days=1)).isoformat()
+        plan_date = str(payload.get("date") or "")
+        if plan_date != expected_date:
+            raise ValueError(f"Plan można zapisać wyłącznie na jutro ({expected_date})")
+        updates = self._validate_future_plan_updates(payload.get("updates"))
+        self.future_plan = {
+            "date": plan_date,
+            "status": "scheduled",
+            "created_at": ha_now().isoformat(timespec="seconds"),
+            "updated_at": ha_now().isoformat(timespec="seconds"),
+            "strategy": str(payload.get("strategy") or "balanced"),
+            "updates": updates,
+            "labels": [str(value) for value in payload.get("labels", []) if value is not None][:24],
+        }
+        await self.async_add_ai_analysis({
+            "timestamp": int(ha_now().timestamp() * 1000),
+            "event": "future_plan_scheduled",
+            "date": plan_date,
+            "selected_hours": self.future_plan["labels"],
+        })
+        await self.async_save_ai_data()
+        self.notify_update()
+
+    async def async_cancel_future_plan(self, reason: str = "Anulowano przez użytkownika") -> None:
+        if not self.future_plan:
+            return
+        self.future_plan = {
+            **self.future_plan,
+            "status": "cancelled",
+            "cancelled_at": ha_now().isoformat(timespec="seconds"),
+            "reason": reason,
+        }
+        await self.async_save_ai_data()
+        self.notify_update()
+
+    async def async_process_future_plan(self) -> None:
+        """Apply the accepted dated plan once, after validating live safety inputs."""
+        plan = self.future_plan
+        if not plan or plan.get("status") != "scheduled":
+            return
+        today = ha_now().date().isoformat()
+        plan_date = str(plan.get("date") or "")
+        if plan_date > today:
+            return
+        if plan_date < today:
+            await self.async_cancel_future_plan("Plan wygasł przed zastosowaniem")
+            async with self._operation_lock:
+                await self.async_apply_safe_defaults("Plan na jutro wygasł przed zastosowaniem")
+            return
+        try:
+            if not self.entity_available(self.battery_soc_sensor):
+                raise RuntimeError("brak poprawnego odczytu SOC")
+            updates = self._validate_future_plan_updates(plan.get("updates"))
+            selling = any(item.get("mode") == MODE_SELLING_FIRST for item in updates)
+            charging = any(item.get("mode") == MODE_CHARGE or item.get("charge_enabled") for item in updates)
+            if selling and not self.entity_available(self.price_sensor):
+                raise RuntimeError("brak ceny sprzedaży")
+            if charging and not self.entity_available(self.buy_price_today_sensor):
+                raise RuntimeError("brak ceny zakupu")
+            await self.async_apply_schedule_patch(updates)
+            self.future_plan = {
+                **plan,
+                "status": "applied",
+                "applied_at": ha_now().isoformat(timespec="seconds"),
+            }
+            await self.async_add_ai_analysis({
+                "timestamp": int(ha_now().timestamp() * 1000),
+                "event": "future_plan_applied",
+                "date": plan_date,
+                "selected_hours": plan.get("labels", []),
+            })
+            await self.async_save_ai_data()
+        except Exception as err:
+            self.future_plan = {
+                **plan,
+                "status": "failed",
+                "failed_at": ha_now().isoformat(timespec="seconds"),
+                "reason": str(err),
+            }
+            await self.async_save_ai_data()
+            async with self._operation_lock:
+                await self.async_apply_safe_defaults(f"Plan na dziś anulowany: {err}")
         self.notify_update()
 
     async def async_clear_all_history(self) -> None:
@@ -2183,6 +2503,7 @@ class DeyeEnergyManagerRuntime:
         if self._tariff_catalog_manager is not None and self._tariff_catalog_manager.refresh_due():
             await self._tariff_catalog_manager.async_refresh()
             self.notify_update()
+        await self.async_process_future_plan()
         async with self._operation_lock:
             try:
                 await self._async_tick_impl(*_args)

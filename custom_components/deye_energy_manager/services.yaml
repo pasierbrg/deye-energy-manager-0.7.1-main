@@ -143,3 +143,17 @@ save_tariff_settings:
 refresh_tariff_catalog:
   name: Odśwież katalog taryf OSD
   description: Sprawdza wersjonowany katalog taryf. W razie błędu zachowuje ostatnią poprawną lub wbudowaną wersję.
+save_future_plan:
+  name: Zapisz plan AI na jutro
+  description: Zapisuje datowany, ręcznie zatwierdzony plan na jutro bez natychmiastowej zmiany powtarzalnego harmonogramu Deye.
+  fields:
+    data:
+      name: Plan JSON
+      description: Data planu, wybrane godziny i dokładne wartości zaakceptowane przez użytkownika.
+      required: true
+      selector:
+        text:
+          multiline: true
+cancel_future_plan:
+  name: Anuluj plan AI na jutro
+  description: Anuluje oczekujący plan na jutro. Nie zmienia bieżącego harmonogramu.

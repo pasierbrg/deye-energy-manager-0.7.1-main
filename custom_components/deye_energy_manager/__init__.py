@@ -61,6 +61,8 @@ SERVICE_NAMES = (
     "apply_schedule_patch",
     "save_tariff_settings",
     "refresh_tariff_catalog",
+    "save_future_plan",
+    "cancel_future_plan",
 )
 _STATIC_PATH_REGISTERED = False
 
@@ -162,6 +164,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def handle_refresh_tariff_catalog(call: ServiceCall) -> None:
         await runtime.async_refresh_tariff_catalog()
 
+    async def handle_save_future_plan(call: ServiceCall) -> None:
+        plan = json.loads(call.data["data"])
+        if not isinstance(plan, dict):
+            raise ValueError("Future plan must be a JSON object")
+        await runtime.async_save_future_plan(plan)
+
+    async def handle_cancel_future_plan(call: ServiceCall) -> None:
+        await runtime.async_cancel_future_plan()
+
     hass.services.async_register(DOMAIN, "apply_settings", handle_apply_settings, schema=APPLY_SCHEMA)
     hass.services.async_register(DOMAIN, "manual_sell", handle_manual_sell, schema=MANUAL_SELL_SCHEMA)
     hass.services.async_register(DOMAIN, "charge_now", handle_charge_now, schema=CHARGE_SCHEMA)
@@ -196,6 +207,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "refresh_tariff_catalog",
         handle_refresh_tariff_catalog,
     )
+    hass.services.async_register(DOMAIN, "save_future_plan", handle_save_future_plan, schema=AI_DATA_SCHEMA)
+    hass.services.async_register(DOMAIN, "cancel_future_plan", handle_cancel_future_plan)
     return True
 
 

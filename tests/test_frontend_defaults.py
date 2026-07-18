@@ -83,6 +83,29 @@ class FrontendDefaultRestoreTests(unittest.TestCase):
         self.assertIn("return this.applyDefaultValues()", method)
         self.assertNotIn("callService", method)
 
+    def test_ai_dialog_contains_approved_navigation_and_controls(self):
+        source = self.sources[0]
+        for required in (
+            "Przegląd",
+            "Proponowane zmiany",
+            "Plan na dziś",
+            "Plan na jutro",
+            "Plan energii 48h",
+            "Jakość danych",
+            "Zaznacz wszystkie",
+            "Odznacz wszystkie",
+            "Pełne 24h",
+            "save_future_plan",
+            "cancel_future_plan",
+        ):
+            self.assertIn(required, source)
+
+    def test_documentation_uses_current_card_cache_revision(self):
+        for name in ("README.md", "INSTALL_PL.md"):
+            source = (ROOT / name).read_text(encoding="utf-8")
+            self.assertIn("deye-energy-manager-card.js?v=0763", source)
+            self.assertNotIn("deye-energy-manager-card.js?v=076\n", source)
+
 
 if __name__ == "__main__":
     unittest.main()

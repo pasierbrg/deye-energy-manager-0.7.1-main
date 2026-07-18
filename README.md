@@ -29,6 +29,8 @@ Wersja 0.7.6 koncentruje się na bezpieczeństwie, jakości danych i wygodniejsz
 - katalog taryf jest sprawdzany przy starcie i co 7 dni; przy błędzie pobierania integracja zachowuje ostatnią poprawną kopię, a tryb ręczny pozwala wpisać własne stawki i godziny;
 - koszt dystrybucji jest doliczany przy wyborze najtańszych godzin ładowania, z uwzględnieniem pory roku, dni roboczych, weekendów i polskich świąt;
 - odczyty mocy, SOC i cen aktualizują sensory managera zdarzeniowo, bez oczekiwania na minutowy cykl sterownika;
+- przebudowano „Sugestie AI” na widok Dziś/Jutro z planem energii 48 h, prognozą SOC, pogodą, oceną jakości danych i trzema rzeczywiście obliczanymi wariantami;
+- plan na jutro jest zapisywany jako datowany plan oczekujący i nigdy nie jest natychmiast wpisywany do powtarzalnego harmonogramu Deye;
 - kreator mapowania został podzielony na Deye, ceny energii, Solcast, pogodę oraz końcowy test; wybór operatora i taryfy znajduje się w karcie;
 - automatyczne mapowanie wyłącznie podpowiada encje i zawsze wymaga zatwierdzenia użytkownika;
 - poprawiono bezpieczeństwo HTML, widoki mobilne i przewijanie okien;
@@ -43,7 +45,7 @@ Pełna lista znajduje się w [CHANGELOG.md](CHANGELOG.md).
 - kompresja harmonogramu do 6 fizycznych slotów Deye Time Of Use;
 - minimalny SOC i minimalna cena sprzedaży dla każdego slotu;
 - ręczne i zbiorcze edytowanie harmonogramu;
-- inteligentne sugestie bazujące na cenach, prognozie PV i historii;
+- inteligentne sugestie Dziś/Jutro bazujące na cenach energii i dystrybucji, Solcast, pogodzie, SOC i wyuczonym profilu zużycia;
 - automatycznie aktualizowany katalog profili dystrybucyjnych PGE, Tauron, Enea, Energa i Stoen;
 - wspomaganie prognozy przez lokalną encję pogodową;
 - statystyki sprzedaży, produkcji, zużycia i pracy baterii;
@@ -51,6 +53,12 @@ Pełna lista znajduje się w [CHANGELOG.md](CHANGELOG.md).
 - eksport historii i kopii konfiguracji.
 
 Sugestie nie są stosowane automatycznie. Użytkownik wybiera godziny i zatwierdza każdą zmianę harmonogramu.
+
+Okno **Sugestie AI** zawiera osobne widoki: **Przegląd**, **Proponowane zmiany**, **Plan na dziś**, **Plan na jutro**, **Plan energii 48h** i **Jakość danych**. W propozycjach przełącznik **Dziś/Jutro** zmienia tabelę, wykres, pogodę, bilans i prognozę SOC. Domyślnie widoczne są tylko godziny proponowane przez model; przycisk **Pełne 24h** pokazuje cały dzień, a jeden dynamiczny przycisk przełącza funkcję **Zaznacz wszystkie/Odznacz wszystkie**. Godziny o pewności poniżej 50% nie są zaznaczane automatycznie.
+
+Plan 48 h nie tworzy brakujących cen ani pogody. Gdy brakuje cen jutra, karta pokazuje brak danych i nie proponuje fikcyjnej transakcji. Solcast jest prognozą podstawową, a `weather.*` wyłącznie korektą pomocniczą. Przy małej historii widoczny jest stan **Wstępne uczenie** i ograniczona pewność.
+
+Przycisk **Zaplanuj wybrane na jutro** zapisuje dokładnie zaakceptowane godziny i parametry wraz z datą. Integracja nie zmienia od razu Deye Time Of Use, ponieważ jego sloty powtarzają się codziennie. Po rozpoczęciu właściwego dnia sprawdzane są encje, SOC i wymagane ceny. Poprawny plan jest zastosowany jeden raz; plan nieaktualny lub niemożliwy do bezpiecznego zastosowania jest anulowany, a integracja stosuje pełne **Ustawienia domyślne** 1:1. Integracja nigdy nie przelicza i nie stosuje samodzielnie innego planu niż zatwierdzony przez użytkownika.
 
 ## Wymagania
 
@@ -122,7 +130,7 @@ Po instalacji mapowanie można zmienić przez **Ustawienia → Urządzenia i us�
 Integracja udostępnia kartę pod adresem:
 
 ```text
-/deye_energy_manager/deye-energy-manager-card.js?v=0762
+/deye_energy_manager/deye-energy-manager-card.js?v=0763
 ```
 
 Jeżeli karta jest instalowana ręcznie, skopiuj:
@@ -134,10 +142,10 @@ www/deye-energy-manager-card.js
 do `/config/www/` i dodaj zasób:
 
 ```text
-/local/deye-energy-manager-card.js?v=0762
+/local/deye-energy-manager-card.js?v=0763
 ```
 
-Po podmianie pliku karty ustaw parametr `v=0762`, przeładuj zasoby Lovelace i wykonaj twarde odświeżenie przeglądarki (`Ctrl + F5`). `0762` jest identyfikatorem drugiej rewizji karty wydania 0.7.6 i wymusza pominięcie starszej kopii z pamięci podręcznej. Dla karty udostępnianej przez integrację używaj adresu `/deye_energy_manager/...`; adres `/local/...` jest przeznaczony wyłącznie dla pliku skopiowanego ręcznie do `/config/www/`.
+Po podmianie pliku karty ustaw parametr `v=0763`, przeładuj zasoby Lovelace i wykonaj twarde odświeżenie przeglądarki (`Ctrl + F5`). `0763` jest identyfikatorem trzeciej rewizji karty wydania 0.7.6 i wymusza pobranie przebudowanego okna „Sugestie AI”. Dla karty udostępnianej przez integrację używaj adresu `/deye_energy_manager/...`; adres `/local/...` jest przeznaczony wyłącznie dla pliku skopiowanego ręcznie do `/config/www/`.
 
 Konfiguracja karty:
 

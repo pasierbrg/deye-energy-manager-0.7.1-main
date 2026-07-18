@@ -101,6 +101,8 @@ def ai_state_attrs(runtime):
         "energy_samples": runtime.energy_samples[-288:],
         "weather": runtime.weather_context(),
         "tariff": runtime.tariff_context(),
+        "planner_48h": runtime.ai_plan_48h(),
+        "future_plan": runtime.future_plan,
     }
 
 
@@ -232,6 +234,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                     "energy_samples",
                     "weather",
                     "tariff",
+                    "planner_48h",
+                    "future_plan",
                 },
             ),
             DeyeManagerSensor(runtime, "daily_pv_production", "Daily PV production", lambda r: r.state_float(r.daily_pv_production_sensor, 0), "kWh", SensorDeviceClass.ENERGY, attrs_fn=source_sensor_attrs(lambda r: r.daily_pv_production_sensor), source_fn=lambda r: r.daily_pv_production_sensor),

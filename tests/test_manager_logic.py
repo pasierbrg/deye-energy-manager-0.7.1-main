@@ -257,6 +257,7 @@ class MappingAndTransactionTests(unittest.TestCase):
         self.assertTrue(select_calls)
         self.assertEqual(select_calls[-1][2]["option"], expected_mode)
 
+
     def test_stop_sell_applies_defaults_and_remains_latched(self):
         runtime = make_runtime()
         asyncio.run(runtime.async_request_stop())
@@ -490,6 +491,92 @@ class MappingAndTransactionTests(unittest.TestCase):
 
         self.assertIn("Maximum Battery Charge Current", runtime.last_error)
         self.assertNotEqual(runtime.last_error, "")
+
+
+class FuturePlanTests(unittest.TestCase):
+    class MemoryStore:
+        def __init__(self):
+            self.value = None
+
+        async def async_save(self, value):
+            self.value = value
+
+        async def async_load(self):
+            return self.value
+
+    def test_future_plan_is_stored_exactly_and_not_applied_early(self):
+        runtime = make_runtime()
+        runtime._ai_store = self.MemoryStore()
+        update = {
+            "slot_key": "05_06", "enabled": True, "charge_enabled": False,
+            "mode": const.MODE_SELLING_FIRST, "sell_power": 5000,
+            "discharge_current": 120, "charge_current": 0,
+            "grid_charge_current": 0, "min_soc": 20, "min_sell_price": 0.9,
+        }
+        asyncio.run(runtime.async_save_future_plan({
+            "date": "2026-07-19", "strategy": "balanced",
+            "labels": ["05:00–06:00"], "updates": [update],
+        }))
+        self.assertEqual("scheduled", runtime.future_plan["status"])
+        self.assertEqual([update], runtime.future_plan["updates"])
+        before = list(runtime.hass.services.calls)
+        asyncio.run(runtime.async_process_future_plan())
+        self.assertEqual(before, runtime.hass.services.calls)
+        self.assertEqual("scheduled", runtime.future_plan["status"])
+
+    def test_future_plan_rejects_wrong_date(self):
+        runtime = make_runtime()
+        runtime._ai_store = self.MemoryStore()
+        with self.assertRaisesRegex(ValueError, "wyłącznie na jutro"):
+            asyncio.run(runtime.async_save_future_plan({
+                "date": "2026-07-18",
+                "updates": [{"slot_key": "05_06", "mode": const.MODE_SELLING_FIRST}],
+            }))
+
+    def test_future_plan_survives_runtime_reload_and_can_be_cancelled(self):
+        store = self.MemoryStore()
+        store.value = {
+            "settings": {}, "history": [], "last_saved_at": "",
+            "future_plan": {
+                "date": "2026-07-19", "status": "scheduled",
+                "updates": [{"slot_key": "05_06", "mode": const.MODE_SELLING_FIRST}],
+            },
+        }
+        runtime = make_runtime()
+        previous_store = manager.Store
+        manager.Store = lambda *_args, **_kwargs: store
+        try:
+            asyncio.run(runtime.async_load_ai_data())
+        finally:
+            manager.Store = previous_store
+        self.assertEqual("scheduled", runtime.future_plan["status"])
+        asyncio.run(runtime.async_cancel_future_plan())
+        self.assertEqual("cancelled", runtime.future_plan["status"])
+        self.assertEqual("cancelled", store.value["future_plan"]["status"])
+
+    def test_failed_activation_uses_full_user_defaults(self):
+        runtime = make_runtime(price=None, default_mode=const.MODE_ZERO_EXPORT_CT)
+        runtime._ai_store = self.MemoryStore()
+        runtime.future_plan = {
+            "date": "2026-07-19", "status": "scheduled",
+            "updates": [{
+                "slot_key": "05_06", "enabled": True,
+                "mode": const.MODE_SELLING_FIRST,
+                "sell_power": 5000, "discharge_current": 120,
+            }],
+        }
+        previous_now = manager.ha_now
+        manager.ha_now = lambda: datetime(2026, 7, 19, 0, 1, tzinfo=timezone.utc)
+        try:
+            asyncio.run(runtime.async_process_future_plan())
+        finally:
+            manager.ha_now = previous_now
+        self.assertEqual("failed", runtime.future_plan["status"])
+        calls = control_number_calls(runtime)
+        self.assertTrue(calls)
+        self.assertFalse(any(call[2]["value"] == 0 for call in calls))
+        mode_calls = [call for call in runtime.hass.services.calls if call[:2] == ("select", "select_option")]
+        self.assertEqual(const.MODE_ZERO_EXPORT_CT, mode_calls[-1][2]["option"])
 
 
 class StatisticsTests(unittest.TestCase):
