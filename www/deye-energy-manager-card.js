@@ -33,6 +33,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
     this._aiShow24 = false;
     this._aiWeatherMode = "daily";
     this._aiChartPinned = null;
+    this._aiChartHiddenSeries = new Set();
     this._aiSelections = { today: new Set(), tomorrow: new Set() };
   }
 
@@ -2634,6 +2635,120 @@ class DeyeEnergyManagerCard extends HTMLElement {
     return `<section class="ai-chart-card ai-chart-v2" data-ai-chart="${chartId}"><h3>${this.escapeHtml(title)}</h3><div class="ai-chart-legend"><span class="load">Zużycie</span><span class="actual">Produkcja rzeczywista</span><span class="solcast">Prognoza Solcast</span><span class="corrected">Prognoza skorygowana</span><span class="band">Przedział prognozy</span><span class="soc">SOC</span><span class="sell">Sprzedaż</span><span class="charge">Ładowanie</span><span class="tariff">Tania dystrybucja</span></div><div class="ai-chart-scroll"><svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${this.escapeHtml(title)}"><text x="15" y="${top + 6}" class="ai-chart-axis">kWh</text>${cheapZones}${grid}${band}${bars}<polyline points="${linePoints("corrected_pv_kwh")}" class="ai-line-corrected"/><line x1="${left}" y1="${top + topHeight}" x2="${width - right}" y2="${top + topHeight}" class="ai-chart-baseline"/><text x="15" y="${socTop + 10}" class="ai-chart-axis">SOC</text><line x1="${left}" y1="${socTop}" x2="${width - right}" y2="${socTop}" class="ai-chart-grid"/><line x1="${left}" y1="${socTop + socHeight}" x2="${width - right}" y2="${socTop + socHeight}" class="ai-chart-baseline"/>${minSocLine}<polyline points="${socLine}" class="ai-line-soc"/>${actions}${weatherIcons}${labels}${daySeparator}${currentLine}<line class="ai-chart-crosshair-x" x1="0" x2="0" y1="${top}" y2="${socTop + socHeight}"/><line class="ai-chart-crosshair-y" x1="${left}" x2="${width - right}" y1="0" y2="0"/>${overlays}</svg></div><div class="ai-chart-tooltip" data-ai-chart-tooltip></div>${tipSources}<small class="ai-chart-help">Najedź kursorem lub dotknij godziny, aby zobaczyć szczegóły. Brakujące dane są oznaczane jako „brak danych”.</small></section>`;
   }
 
+  aiReadableEnergyChart(rows, title = "Plan energii") {
+    const values = Array.isArray(rows) ? rows : [];
+    const is48h = values.length > 24;
+    const count = Math.max(1, values.length);
+    const width = is48h ? 1800 : 1080;
+    const height = 610;
+    const left = 76, right = 72, top = 58, plotHeight = 305;
+    const axisY = 390, weatherTimeY = 423, weatherIconY = 451;
+    const statusTop = 486, statusRowHeight = 31;
+    const chartWidth = width - left - right;
+    const step = chartWidth / count;
+    const hidden = this._aiChartHiddenSeries instanceof Set ? this._aiChartHiddenSeries : new Set();
+    const visible = (name) => !hidden.has(name);
+    const history = this.aiHistoricalHours();
+    const actual = values.map((row) => history.get(`${row.date}-${row.hour}`) || null);
+    const weatherState = this._hass?.states?.[this.entity("sensor", "ai_state")]?.attributes?.weather || {};
+    const weatherRows = Array.isArray(weatherState.forecast) ? weatherState.forecast : [];
+    const weatherMap = new Map(weatherRows.map((row) => {
+      const stamp = new Date(row?.datetime ?? row?.time ?? "");
+      return Number.isNaN(stamp.getTime()) ? ["", null] : [`${this.localDateKey(stamp)}-${stamp.getHours()}`, row];
+    }));
+    const energyNumbers = [];
+    values.forEach((row, index) => {
+      [actual[index]?.pvSamples ? actual[index].pv : null, actual[index]?.loadSamples ? actual[index].load : null,
+        this.asNumber(row.load_kwh), this.asNumber(row.solcast_kwh), this.asNumber(row.corrected_pv_kwh), this.asNumber(row.forecast_high_kwh)]
+        .forEach((value) => { if (value !== null) energyNumbers.push(Math.max(0, value)); });
+    });
+    const maxEnergy = Math.max(1, ...energyNumbers) * 1.08;
+    const x = (index) => left + index * step + step / 2;
+    const yEnergy = (value) => top + plotHeight - Math.max(0, value) / maxEnergy * plotHeight;
+    const ySoc = (value) => top + plotHeight - Math.max(0, Math.min(100, value)) / 100 * plotHeight;
+    const linePoints = (field, yFn) => values.map((row, index) => {
+      const value = this.asNumber(row[field]);
+      return value === null ? null : `${x(index).toFixed(1)},${yFn(value).toFixed(1)}`;
+    }).filter(Boolean).join(" ");
+    const horizontalGrid = [0, .2, .4, .6, .8, 1].map((part) => {
+      const y = top + plotHeight * part;
+      const energyLabel = maxEnergy * (1 - part);
+      const socLabel = 100 * (1 - part);
+      return `<line x1="${left}" y1="${y.toFixed(1)}" x2="${width - right}" y2="${y.toFixed(1)}" class="ai-readable-grid"/><text x="${left - 12}" y="${(y + 4).toFixed(1)}" text-anchor="end" class="ai-readable-axis">${energyLabel.toFixed(1)}</text><text x="${width - right + 12}" y="${(y + 4).toFixed(1)}" class="ai-readable-axis">${socLabel.toFixed(0)}</text>`;
+    }).join("");
+    const gridInterval = is48h ? 4 : 2;
+    const verticalGrid = values.map((row, index) => index % gridInterval === 0
+      ? `<line x1="${x(index).toFixed(1)}" y1="${top}" x2="${x(index).toFixed(1)}" y2="${top + plotHeight}" class="ai-readable-grid ai-readable-grid-v"/>` : "").join("");
+    const bars = values.map((row, index) => {
+      const actualRow = actual[index];
+      const load = actualRow?.loadSamples ? actualRow.load : this.asNumber(row.load_kwh);
+      const production = actualRow?.pvSamples ? actualRow.pv : null;
+      const draw = (value, offset, css) => value === null ? "" : `<rect x="${(x(index) + step * offset - Math.max(2.5, step * .14)).toFixed(1)}" y="${yEnergy(value).toFixed(1)}" width="${Math.max(5, step * .28).toFixed(1)}" height="${Math.max(0, top + plotHeight - yEnergy(value)).toFixed(1)}" rx="1.5" class="${css}"/>`;
+      return `${visible("load") ? draw(load, -.18, "ai-readable-load") : ""}${visible("actual") ? draw(production, .18, "ai-readable-actual") : ""}`;
+    }).join("");
+    const upper = values.map((row, index) => {
+      const value = this.asNumber(row.forecast_high_kwh);
+      return value === null ? null : `${x(index).toFixed(1)},${yEnergy(value).toFixed(1)}`;
+    }).filter(Boolean);
+    const lower = values.map((row, index) => {
+      const value = this.asNumber(row.forecast_low_kwh);
+      return value === null ? null : `${x(index).toFixed(1)},${yEnergy(value).toFixed(1)}`;
+    }).filter(Boolean).reverse();
+    const band = visible("band") && upper.length && lower.length ? `<polygon points="${[...upper, ...lower].join(" ")}" class="ai-readable-band"/>` : "";
+    const solcastLine = visible("solcast") ? `<polyline points="${linePoints("solcast_kwh", yEnergy)}" class="ai-readable-solcast"/>` : "";
+    const correctedLine = visible("corrected") ? `<polyline points="${linePoints("corrected_pv_kwh", yEnergy)}" class="ai-readable-corrected"/>` : "";
+    const socLine = visible("soc") ? `<polyline points="${linePoints("soc_after", ySoc)}" class="ai-readable-soc"/>` : "";
+    const minSoc = this.asNumber(this.aiSettings()?.minSoc);
+    const minSocLine = visible("minimum") && minSoc !== null
+      ? `<line x1="${left}" y1="${ySoc(minSoc).toFixed(1)}" x2="${width - right}" y2="${ySoc(minSoc).toFixed(1)}" class="ai-readable-min-soc"/><text x="${left + 7}" y="${(ySoc(minSoc) - 7).toFixed(1)}" class="ai-readable-min-label">Min. SOC ${minSoc.toFixed(0)}%</text>` : "";
+    const xLabels = values.map((row, index) => index % gridInterval === 0
+      ? `<text x="${x(index).toFixed(1)}" y="${axisY}" text-anchor="middle" class="ai-readable-hour">${String(row.hour).padStart(2, "0")}:00</text>` : "").join("");
+    const weather = values.map((row, index) => {
+      const forecast = weatherMap.get(`${row.date}-${row.hour}`);
+      const meta = forecast ? this.aiWeatherMeta(forecast.condition) : ["—", "brak prognozy"];
+      const precipitation = this.asNumber(forecast?.precipitation_probability);
+      const rainClass = precipitation === null ? "missing" : precipitation >= 70 ? "high" : precipitation >= 35 ? "medium" : "low";
+      return `<text x="${x(index).toFixed(1)}" y="${weatherIconY}" text-anchor="middle" class="ai-readable-weather">${meta[0]}</text><rect x="${(x(index) - Math.max(3, step * .25)).toFixed(1)}" y="${weatherIconY + 9}" width="${Math.max(6, step * .5).toFixed(1)}" height="3" rx="1.5" class="ai-weather-risk ${rainClass}"/>`;
+    }).join("");
+    const distributionValues = values.map((row) => this.asNumber(row.distribution)).filter((value) => value !== null && value > 0);
+    const minDistribution = distributionValues.length ? Math.min(...distributionValues) : null;
+    const statuses = values.map((row, index) => {
+      const cellX = left + index * step + step * .08;
+      const cellWidth = Math.max(3, step * .84);
+      const selling = row.action === "sell";
+      const charging = row.action === "charge";
+      const rate = this.asNumber(row.distribution);
+      const cheap = minDistribution !== null && rate !== null && rate <= minDistribution + .00001;
+      return `${selling ? `<rect x="${cellX.toFixed(1)}" y="${(statusTop + 5).toFixed(1)}" width="${cellWidth.toFixed(1)}" height="${statusRowHeight - 10}" rx="3" class="ai-status-sell"/>` : ""}${charging ? `<rect x="${cellX.toFixed(1)}" y="${(statusTop + statusRowHeight + 5).toFixed(1)}" width="${cellWidth.toFixed(1)}" height="${statusRowHeight - 10}" rx="3" class="ai-status-charge"/>` : ""}${cheap ? `<rect x="${cellX.toFixed(1)}" y="${(statusTop + statusRowHeight * 2 + 5).toFixed(1)}" width="${cellWidth.toFixed(1)}" height="${statusRowHeight - 10}" rx="3" class="ai-status-tariff"/>` : ""}`;
+    }).join("");
+    const statusGrid = [0, 1, 2, 3].map((index) => `<line x1="${left}" y1="${statusTop + index * statusRowHeight}" x2="${width - right}" y2="${statusTop + index * statusRowHeight}" class="ai-status-grid"/>`).join("");
+    const statusVertical = values.map((row, index) => index % gridInterval === 0 ? `<line x1="${x(index).toFixed(1)}" y1="${statusTop}" x2="${x(index).toFixed(1)}" y2="${statusTop + statusRowHeight * 3}" class="ai-status-grid ai-status-grid-v"/>` : "").join("");
+    const firstDate = values[0]?.date || "";
+    const secondDate = values[24]?.date || "";
+    const daySeparator = is48h ? `<line x1="${(left + step * 24).toFixed(1)}" y1="${top - 18}" x2="${(left + step * 24).toFixed(1)}" y2="${statusTop + statusRowHeight * 3}" class="ai-readable-day-separator"/><text x="${left + step * 12}" y="${top - 25}" text-anchor="middle" class="ai-readable-day-label">Dziś · ${this.escapeHtml(firstDate)}</text><text x="${left + step * 36}" y="${top - 25}" text-anchor="middle" class="ai-readable-day-label">Jutro · ${this.escapeHtml(secondDate)}</text>` : "";
+    const now = new Date();
+    const currentIndex = values.findIndex((row) => row.date === this.localDateKey(now) && Number(row.hour) === now.getHours());
+    const nowX = currentIndex < 0 ? null : left + step * (currentIndex + now.getMinutes() / 60);
+    const currentLine = nowX === null ? "" : `<line x1="${nowX.toFixed(1)}" y1="${top}" x2="${nowX.toFixed(1)}" y2="${statusTop + statusRowHeight * 3}" class="ai-readable-now"/><rect x="${(nowX + 6).toFixed(1)}" y="${top + 5}" width="42" height="20" rx="4" class="ai-readable-now-tag"/><text x="${(nowX + 27).toFixed(1)}" y="${top + 19}" text-anchor="middle" class="ai-readable-now-text">Teraz</text>`;
+    const chartId = `readable-${String(title).toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+    const display = (value, digits = 2, unit = "") => {
+      const number = this.asNumber(value);
+      return number === null ? "brak danych" : `${number.toFixed(digits)}${unit}`;
+    };
+    const tips = values.map((row, index) => {
+      const actualRow = actual[index];
+      const forecast = weatherMap.get(`${row.date}-${row.hour}`) || {};
+      const [, condition] = this.aiWeatherMeta(forecast.condition);
+      return `<div class="ai-chart-tip-source" data-ai-tip-source="${chartId}-${index}"><strong>${this.escapeHtml(String(row.date || ""))} · ${this.escapeHtml(String(row.label || this.hourLabel(row.hour)))}</strong><div><span>Produkcja rzeczywista</span><b>${actualRow?.pvSamples ? display(actualRow.pv, 2, " kWh") : "brak danych"}</b><span>Zużycie</span><b>${actualRow?.loadSamples ? display(actualRow.load, 2, " kWh") : display(row.load_kwh, 2, " kWh")}</b><span>Prognoza Solcast</span><b>${display(row.solcast_kwh, 2, " kWh")}</b><span>Prognoza skorygowana</span><b>${display(row.corrected_pv_kwh, 2, " kWh")}</b><span>Przedział prognozy</span><b>${display(row.forecast_low_kwh, 2)}–${display(row.forecast_high_kwh, 2, " kWh")}</b><span>SOC</span><b>${display(row.soc_after, 1, "%")}</b><span>Status</span><b>${row.action === "sell" ? "sprzedaż" : row.action === "charge" ? "ładowanie" : "bez zmiany"}</b><span>Dystrybucja</span><b>${display(row.distribution, 4, " PLN/kWh")}</b><span>Pogoda</span><b>${forecast.condition ? `${this.escapeHtml(condition)} · ${display(forecast.temperature, 1, "°C")}` : "brak danych"}</b><span>Opady</span><b>${display(forecast.precipitation_probability, 0, "%")}</b><span>Bilans</span><b>${display(row.balance_pln, 2, " PLN")}</b></div></div>`;
+    }).join("");
+    const hits = values.map((row, index) => `<rect x="${(left + index * step).toFixed(1)}" y="${top}" width="${Math.max(1, step).toFixed(1)}" height="${statusTop + statusRowHeight * 3 - top}" class="ai-chart-hit" data-ai-chart-point="${chartId}" data-ai-chart-index="${index}"/>`).join("");
+    const legend = [
+      ["load", "Zużycie"], ["actual", "Produkcja rzeczywista"], ["solcast", "Prognoza Solcast"],
+      ["corrected", "Prognoza skorygowana"], ["band", "Przedział prognozy"], ["soc", "SOC (%)"], ["minimum", `Min. SOC ${minSoc === null ? "" : `${minSoc.toFixed(0)}%`}`],
+    ].map(([key, label]) => `<button class="${hidden.has(key) ? "disabled" : ""} ${key}" data-ai-chart-series="${key}" type="button"><i></i>${label}</button>`).join("");
+    return `<section class="ai-chart-card ai-readable-chart" data-ai-chart="${chartId}"><h3>${this.escapeHtml(title)}</h3><div class="ai-readable-legend">${legend}</div><div class="ai-chart-scroll"><svg viewBox="0 0 ${width} ${height}" style="min-width:${width}px" role="img" aria-label="${this.escapeHtml(title)}"><text x="${left - 40}" y="${top - 16}" class="ai-readable-unit">kWh</text><text x="${width - right + 24}" y="${top - 16}" class="ai-readable-unit">%</text>${horizontalGrid}${verticalGrid}${band}${bars}${solcastLine}${correctedLine}${socLine}${minSocLine}<line x1="${left}" y1="${top + plotHeight}" x2="${width - right}" y2="${top + plotHeight}" class="ai-readable-baseline"/>${xLabels}<text x="12" y="${weatherIconY}" class="ai-readable-section-label">Pogoda</text>${weather}${statusGrid}${statusVertical}<text x="12" y="${statusTop - 10}" class="ai-readable-section-label">Status godziny</text><text x="15" y="${statusTop + 21}" class="ai-status-label sell">■ Sprzedaż</text><text x="15" y="${statusTop + statusRowHeight + 21}" class="ai-status-label charge">■ Ładowanie</text><text x="15" y="${statusTop + statusRowHeight * 2 + 21}" class="ai-status-label tariff">■ Tania dystrybucja</text>${statuses}${daySeparator}${currentLine}<line class="ai-chart-crosshair-x" x1="0" x2="0" y1="${top}" y2="${statusTop + statusRowHeight * 3}"/><line class="ai-chart-crosshair-y" x1="${left}" x2="${width - right}" y1="0" y2="0"/>${hits}</svg></div><div class="ai-chart-tooltip" data-ai-chart-tooltip></div>${tips}<small class="ai-chart-help">Kliknij legendę, aby ukryć serię. Najedź kursorem lub dotknij godziny, aby zobaczyć energię, SOC, pogodę i status.</small></section>`;
+  }
+
   renderAiOverview(slots, planner) {
     const summaries = new Map((planner.days || []).map((row) => [row.day, row]));
     const checkpoints = planner.checkpoints || {};
@@ -2643,7 +2758,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
       <section class="ai-metric-card"><h3>Najtańsze godziny zakupu</h3>${this.aiPriceColumns(slots, "buy")}</section>
       <section class="ai-metric-card"><h3>Prognoza SOC 48h</h3><div class="ai-kpis"><div><span>Koniec dziś</span><strong>${this.formatNumber(checkpoints.today_end, 1)}%</strong></div><div><span>Jutro 05:00</span><strong>${this.formatNumber(checkpoints.tomorrow_05, 1)}%</strong></div><div><span>Jutro 09:00</span><strong>${this.formatNumber(checkpoints.tomorrow_09, 1)}%</strong></div><div><span>Koniec jutro</span><strong>${this.formatNumber(checkpoints.tomorrow_end, 1)}%</strong></div></div></section>
       <section class="ai-metric-card"><h3>Bilans planu</h3><p>Dziś: ${this.formatEnergy(summaries.get("today")?.sold_kwh || 0)} sprzedaży / ${this.formatNumber(summaries.get("today")?.balance_pln, 2)} PLN<br>Jutro: ${this.formatEnergy(summaries.get("tomorrow")?.sold_kwh || 0)} sprzedaży / ${this.formatNumber(summaries.get("tomorrow")?.balance_pln, 2)} PLN</p><p class="${future.status === "scheduled" ? "good" : ""}">Plan na jutro: ${future.status === "scheduled" ? `zaplanowany (${future.date})` : "niezaplanowany"}</p>${future.status === "scheduled" ? '<button class="ai-cancel-plan" data-cancel-future-plan="1">Anuluj plan na jutro</button>' : ""}</section>
-      ${this.aiEnergyChart((planner.rows || []).slice(0, 48), "Plan energii 48h")}
+      ${this.aiReadableEnergyChart((planner.rows || []).slice(0, 48), "Plan energii 48h")}
     </div>`;
   }
 
@@ -2674,7 +2789,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
       <div class="ai-proposal-toolbar"><div class="ai-day-tabs"><button class="${day === "today" ? "active" : ""}" data-ai-day="today">Dziś</button><button class="${day === "tomorrow" ? "active" : ""}" data-ai-day="tomorrow">Jutro</button></div><div class="ai-view-tools"><button data-ai-toggle-24="1">${this._aiShow24 ? "Tylko propozycje" : "Pełne 24h"}</button><button class="${allSelected ? "neutral" : "select"}" data-ai-toggle-selection="1" ${!proposed.length ? "disabled" : ""}>${allSelected ? "× Odznacz wszystkie" : "✓ Zaznacz wszystkie"}</button></div></div>
       <div class="ai-plan-table-wrap"><table class="ai-plan-table"><thead><tr><th>Wybór</th><th>Godzina</th><th>Tryb</th><th>Moc</th><th>Rozł.</th><th>Ład.</th><th>Energia</th><th>SOC po</th><th>Bilans</th><th>Pewność</th></tr></thead><tbody>${tableRows}</tbody></table></div>
       <div class="ai-decision-grid"><section><h3>🏆 Najlepsza decyzja</h3><p>${best ? `${best.label}<br>${best.mode} · pewność ${this.formatNumber(best.confidence, 0)}%` : "Brak decyzji spełniającej warunki"}</p></section><section><h3>⚖ Trzy warianty</h3><div class="ai-variants">${variantSummary("safe", "Bezpieczny")}${variantSummary("balanced", "Zrównoważony")}${variantSummary("profit", "Maksymalny zysk")}</div></section><section><h3>💡 Uzasadnienie AI</h3><p>Plan uwzględnia ceny energii i dystrybucji, Solcast, pogodę pomocniczą, wyuczony profil domu, sprawność i rezerwę baterii. ${quality.learning_stage === "gotowe" ? "Model ma wystarczającą historię." : "Model jest na etapie wstępnego uczenia, dlatego pewność jest ograniczona."}</p></section></div>
-      ${this.aiEnergyChart(allRows, `Plan na ${day === "today" ? "dziś" : "jutro"}`)}
+      ${this.aiReadableEnergyChart(allRows, `Plan na ${day === "today" ? "dziś" : "jutro"}`)}
       <div class="ai-support-grid">${this.aiWeatherCard(planner, day)}${this.renderAiQualityCard(planner)}</div>
       <button class="ai-apply-plan" data-apply-ai-day="1" ${!selectedCount ? "disabled" : ""}>${day === "today" ? "Zastosuj wybrane na dziś" : "Zaplanuj wybrane na jutro"} (${selectedCount})</button>
     </div>`;
@@ -2708,7 +2823,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
   renderAiPlanDay(planner, day) {
     const rows = this.aiRowsForDay(planner, day);
     const summary = (planner.days || []).find((item) => item.day === day) || {};
-    return `<div class="ai-day-plan"><div class="ai-kpis"><div><span>SOC start</span><strong>${this.formatNumber(summary.start_soc, 1)}%</strong></div><div><span>SOC koniec</span><strong>${this.formatNumber(summary.end_soc, 1)}%</strong></div><div><span>Sprzedaż</span><strong>${this.formatEnergy(summary.sold_kwh || 0)}</strong></div><div><span>Zakup</span><strong>${this.formatEnergy(summary.bought_kwh || 0)}</strong></div><div><span>Bilans</span><strong>${this.formatNumber(summary.balance_pln, 2)} PLN</strong></div></div>${this.aiEnergyChart(rows, day === "today" ? "Plan na dziś" : "Plan na jutro")}${this.aiWeatherCard(planner, day)}</div>`;
+    return `<div class="ai-day-plan"><div class="ai-kpis"><div><span>SOC start</span><strong>${this.formatNumber(summary.start_soc, 1)}%</strong></div><div><span>SOC koniec</span><strong>${this.formatNumber(summary.end_soc, 1)}%</strong></div><div><span>Sprzedaż</span><strong>${this.formatEnergy(summary.sold_kwh || 0)}</strong></div><div><span>Zakup</span><strong>${this.formatEnergy(summary.bought_kwh || 0)}</strong></div><div><span>Bilans</span><strong>${this.formatNumber(summary.balance_pln, 2)} PLN</strong></div></div>${this.aiReadableEnergyChart(rows, day === "today" ? "Plan na dziś" : "Plan na jutro")}${this.aiWeatherCard(planner, day)}</div>`;
   }
 
   renderAiDialog(slots) {
@@ -2722,7 +2837,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
     if (this._aiView === "proposals") body = this.renderAiProposalView(slots, planner);
     if (this._aiView === "today") body = this.renderAiPlanDay(planner, "today");
     if (this._aiView === "tomorrow") body = this.renderAiPlanDay(planner, "tomorrow");
-    if (this._aiView === "energy") body = `<div class="ai-energy-48">${this.aiEnergyChart(planner.rows || [], "Plan energii 48h")}<div class="ai-support-grid">${this.aiWeatherCard(planner, "today")}${this.aiWeatherCard(planner, "tomorrow")}</div></div>`;
+    if (this._aiView === "energy") body = `<div class="ai-energy-48">${this.aiReadableEnergyChart(planner.rows || [], "Plan energii 48h")}<div class="ai-support-grid">${this.aiWeatherCard(planner, "today")}${this.aiWeatherCard(planner, "tomorrow")}</div></div>`;
     if (this._aiView === "quality") body = `<div class="ai-quality-full">${this.renderAiQualityCard(planner)}${this.aiWeatherCard(planner, "today")}${this.aiWeatherCard(planner, "tomorrow")}</div>`;
     const quality = planner.data_quality || {};
     return `<div class="overlay" data-close-dialog="1"><section class="dialog ai-dialog ai-dialog-v2" data-dialog-box="1"><div class="dialog-head"><strong>Sugestie AI</strong><button type="button" data-close-dialog="1">${this.iconSvg("close")}</button></div><div class="ai-shell"><aside class="ai-sidebar"><nav>${nav}</nav><div class="ai-learning-status"><span>Status AI</span><strong>${quality.learning_stage === "gotowe" ? "UCZY SIĘ" : "WSTĘPNE UCZENIE"}</strong><small>Zapisane dni: ${quality.recorded_days || 0}</small></div></aside><main class="ai-main" data-scroll-key="ai-main">${body}</main></div></section></div>`;
@@ -3183,6 +3298,8 @@ class DeyeEnergyManagerCard extends HTMLElement {
            .ai-chart-v2{position:relative;overflow:visible}.ai-chart-v2 h3{margin-bottom:8px}.ai-chart-scroll{overflow-x:auto;overflow-y:hidden;scrollbar-color:#527385 #071924}.ai-chart-v2 svg{width:100%;min-width:790px;max-height:none}.ai-chart-grid{stroke:rgba(152,195,216,.17);stroke-width:1}.ai-chart-baseline{stroke:#88a9b9;stroke-width:1.5}.ai-chart-axis,.ai-day-label,.ai-now-label{fill:#9ab7c6;font-size:11px}.ai-day-label{fill:#d7edf7;font-weight:800}.ai-bar-load{fill:#35aee8}.ai-bar-actual{fill:#ff9f43}.ai-bar-solcast{fill:#77d84b;opacity:.72}.ai-forecast-band{fill:rgba(255,209,102,.14);stroke:rgba(255,209,102,.3);stroke-width:1}.ai-line-corrected{fill:none;stroke:#b77cff;stroke-width:3;stroke-linejoin:round;stroke-linecap:round}.ai-line-soc{fill:none;stroke:#ffd200;stroke-width:3;stroke-linejoin:round;stroke-linecap:round}.ai-min-soc{stroke:#ff7585;stroke-width:1.3;stroke-dasharray:6 5}.ai-action-sell{fill:#7ee22d}.ai-action-charge{fill:#ffd166}.ai-cheap-zone{fill:rgba(255,209,102,.07)}.ai-chart-weather{font-size:15px}.ai-day-separator{stroke:#5cc2ff;stroke-width:2;stroke-dasharray:6 5}.ai-now-line{stroke:#ff5f70;stroke-width:2;stroke-dasharray:5 4}.ai-now-label{fill:#ff9aa5;font-weight:800}.ai-chart-hit{fill:transparent;pointer-events:all;cursor:crosshair}.ai-chart-crosshair-x,.ai-chart-crosshair-y{display:none;stroke:#d8f2ff;stroke-width:1;stroke-dasharray:4 3;pointer-events:none}.ai-chart-crosshair-x.visible,.ai-chart-crosshair-y.visible{display:block}.ai-chart-tooltip{display:none;position:absolute;z-index:20;width:min(286px,calc(100% - 16px));padding:11px;border:1px solid #4d7b94;border-radius:7px;background:rgba(3,16,25,.97);box-shadow:0 12px 30px rgba(0,0,0,.45);color:#e9f6fb;font-size:11px;pointer-events:none}.ai-chart-tooltip.visible{display:block}.ai-chart-tooltip>strong{display:block;margin-bottom:8px;color:#7ee22d;font-size:12px}.ai-chart-tooltip>div{display:grid;grid-template-columns:1fr auto;gap:4px 10px}.ai-chart-tooltip span{color:#91adbc}.ai-chart-tooltip b{text-align:right}.ai-chart-tip-source{display:none}.ai-chart-help{display:block;margin-top:5px;color:#83a3b3}.ai-chart-legend .actual:before{background:#ff9f43}.ai-chart-legend .solcast:before{background:#77d84b}.ai-chart-legend .corrected:before{height:3px;background:#b77cff}.ai-chart-legend .band:before{background:rgba(255,209,102,.35);border:1px solid rgba(255,209,102,.6)}
            .ai-weather-v2{min-width:0}.ai-weather-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}.ai-weather-head>div:first-child{display:flex;align-items:center;gap:12px}.ai-weather-icon{font-size:42px;line-height:1}.ai-weather-head h3{margin:0!important;text-transform:none}.ai-weather-temperature{text-align:right}.ai-weather-temperature strong{display:block;color:#f3fbff;font-size:26px}.ai-weather-temperature span{color:#9db7c5}.ai-weather-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin:12px 0}.ai-weather-facts span{padding:8px;border:1px solid rgba(103,158,184,.18);border-radius:6px;color:#91adbc}.ai-weather-facts b{display:block;margin-top:3px;color:#e6f4fa}.ai-weather-tabs{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid rgba(103,158,184,.25)}.ai-weather-tabs button{padding:9px;border:0;border-bottom:2px solid transparent;background:transparent;color:#b7cfda;cursor:pointer}.ai-weather-tabs button.active{border-bottom-color:#2aaaff;color:#52baff}.ai-weather-strip{display:flex;gap:7px;overflow-x:auto;padding:10px 0}.ai-weather-day,.ai-weather-hour{min-width:66px;display:grid;justify-items:center;gap:3px;padding:7px;border-radius:6px;background:rgba(3,16,25,.42)}.ai-weather-day span,.ai-weather-hour span{font-size:25px}.ai-weather-day small,.ai-weather-hour small{color:#92aebb}.ai-weather-source{display:block;margin-top:3px}.ai-energy-48>.ai-support-grid{grid-template-columns:1fr 1fr}
            .ai-proposals-view>h2{margin:0 0 14px;color:#7ee22d;font-size:18px}
+           .ai-readable-chart{position:relative;overflow:visible;padding:15px 12px 12px;background:radial-gradient(circle at 45% 15%,rgba(17,84,117,.13),transparent 45%),linear-gradient(180deg,rgba(9,35,51,.88),rgba(5,23,35,.92))}.ai-readable-chart h3{margin:0 0 10px;color:#7ee22d}.ai-readable-chart .ai-chart-scroll{border-top:1px solid rgba(111,166,191,.13);overflow-x:auto;overflow-y:hidden;scrollbar-color:#527385 #071924;scrollbar-width:thin}.ai-readable-chart svg{display:block;width:100%;height:auto;max-height:none!important}.ai-readable-legend{display:flex;flex-wrap:wrap;justify-content:center;gap:6px 13px;padding:0 5px 10px}.ai-readable-legend button{display:inline-flex;align-items:center;gap:6px;border:0;background:transparent;color:#adc5d1;font:inherit;font-size:11px;cursor:pointer;padding:4px 5px;border-radius:4px}.ai-readable-legend button:hover{background:rgba(89,164,201,.1);color:#e9f7fd}.ai-readable-legend button.disabled{opacity:.3;text-decoration:line-through}.ai-readable-legend i{display:block;width:14px;height:7px;border-radius:2px;background:#7b96a4}.ai-readable-legend .load i{background:#35aee8}.ai-readable-legend .actual i{background:#ff8a32}.ai-readable-legend .solcast i{height:3px;background:#67c842}.ai-readable-legend .corrected i{height:3px;background:#bd6dff}.ai-readable-legend .band i{height:9px;background:rgba(151,191,213,.34);border:1px solid rgba(161,205,228,.55)}.ai-readable-legend .soc i{height:3px;background:#ffd200}.ai-readable-legend .minimum i{height:2px;background:repeating-linear-gradient(90deg,#ff6577 0 5px,transparent 5px 8px)}
+           .ai-readable-grid{stroke:rgba(136,184,205,.16);stroke-width:1}.ai-readable-grid-v{stroke-dasharray:3 4;stroke:rgba(139,187,207,.24)}.ai-readable-baseline{stroke:#66899b;stroke-width:1.2}.ai-readable-axis,.ai-readable-hour,.ai-readable-unit,.ai-readable-section-label,.ai-readable-day-label{fill:#a7c1ce;font-size:11px}.ai-readable-unit{fill:#dcecf4;font-weight:800;font-size:12px}.ai-readable-hour{fill:#c6dce6;font-weight:700}.ai-readable-load{fill:#35aee8;filter:drop-shadow(0 0 2px rgba(53,174,232,.25))}.ai-readable-actual{fill:#ff8a32;filter:drop-shadow(0 0 2px rgba(255,138,50,.25))}.ai-readable-band{fill:rgba(151,191,213,.2);stroke:rgba(165,204,224,.3);stroke-width:1}.ai-readable-solcast{fill:none;stroke:#67c842;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}.ai-readable-corrected{fill:none;stroke:#bd6dff;stroke-width:2.8;stroke-linecap:round;stroke-linejoin:round}.ai-readable-soc{fill:none;stroke:#ffd200;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}.ai-readable-min-soc{stroke:#ff6577;stroke-width:1.6;stroke-dasharray:7 6}.ai-readable-min-label{fill:#ff8996;font-size:10px;font-weight:700}.ai-readable-weather{font-size:18px}.ai-weather-risk{opacity:.9}.ai-weather-risk.low{fill:#65c95a}.ai-weather-risk.medium{fill:#ffd166}.ai-weather-risk.high{fill:#49aaff}.ai-weather-risk.missing{fill:#536d79;opacity:.35}.ai-readable-section-label{font-weight:800;fill:#9fb9c6}.ai-status-grid{stroke:rgba(116,166,188,.16);stroke-width:1}.ai-status-grid-v{stroke-dasharray:3 4}.ai-status-label{font-size:10px;font-weight:700}.ai-status-label.sell{fill:#7ee22d}.ai-status-label.charge{fill:#ffd200}.ai-status-label.tariff{fill:#b39a50}.ai-status-sell{fill:#69d438;stroke:#8de960;stroke-width:1}.ai-status-charge{fill:#ffd200;stroke:#ffe36a;stroke-width:1}.ai-status-tariff{fill:#9f863d;stroke:#c7ad5b;stroke-width:1}.ai-readable-day-separator{stroke:#52bfff;stroke-width:2.2;stroke-dasharray:7 5}.ai-readable-day-label{fill:#d8eff9;font-size:12px;font-weight:900}.ai-readable-now{stroke:#ff5d70;stroke-width:2;stroke-dasharray:6 4}.ai-readable-now-tag{fill:#f3f7f9;stroke:#ff5d70}.ai-readable-now-text{fill:#172d38;font-size:10px;font-weight:900}.ai-readable-chart .ai-chart-help{margin:8px 2px 0}.ai-readable-chart .ai-chart-tooltip{width:min(300px,calc(100% - 16px))}
            @media(max-width:980px){.ai-energy-48>.ai-support-grid{grid-template-columns:1fr}.ai-chart-v2 svg{min-width:860px}.ai-weather-facts{grid-template-columns:1fr 1fr}.ai-weather-facts span:last-child{grid-column:1/-1}}
            @media(max-width:1500px){.info-grid{grid-template-columns:1fr 1fr}.info-grid>.panel:nth-child(3){grid-column:1/-1}.schedule-main.selecting{grid-template-columns:1fr}.bulk-panel{max-width:none}.mode-legend{grid-template-columns:repeat(3,minmax(0,1fr))}}
            @media(max-width:980px){.dem-v073{padding:10px}.info-grid{grid-template-columns:1fr}.status-grid,.sales-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.info-grid>.panel{height:auto;min-height:340px}.schedule-head{display:grid}.schedule-tools{justify-content:stretch}.tool-btn{flex:1}.mode-legend{grid-template-columns:1fr 1fr}.schedule-table{min-width:1160px}.schedule-table-card{overflow-x:auto}.sales-tables{grid-template-columns:1fr}.sales-chart{overflow-x:auto;grid-template-columns:repeat(24,24px)}.price-scroll{height:260px;overflow:auto;scrollbar-gutter:stable}.solcast-days{grid-template-columns:repeat(2,1fr)}.settings-layout{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}.settings-nav{flex-direction:row;overflow-x:auto;overflow-y:hidden;border-right:0;border-bottom:1px solid var(--line)}.settings-nav button{width:auto;min-width:max-content;text-align:center}.diagnostic-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.ai-shell{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}.ai-sidebar{border-right:0;border-bottom:1px solid var(--line);padding:7px}.ai-sidebar nav{display:flex;overflow-x:auto}.ai-sidebar nav button{min-width:max-content}.ai-learning-status{display:none}.ai-overview-grid{grid-template-columns:1fr}.ai-overview-grid>.ai-chart-card{grid-column:auto}.ai-decision-grid,.ai-quality-full{grid-template-columns:1fr}.ai-support-grid{grid-template-columns:1fr}.ai-day-plan>.ai-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}}
@@ -3567,6 +3684,13 @@ class DeyeEnergyManagerCard extends HTMLElement {
       this._aiWeatherMode = el.dataset.aiWeatherMode === "hourly" ? "hourly" : "daily";
       this.render();
     }));
+    this.querySelectorAll("[data-ai-chart-series]").forEach((el) => el.addEventListener("click", () => {
+      if (!(this._aiChartHiddenSeries instanceof Set)) this._aiChartHiddenSeries = new Set();
+      const series = el.dataset.aiChartSeries;
+      if (this._aiChartHiddenSeries.has(series)) this._aiChartHiddenSeries.delete(series);
+      else this._aiChartHiddenSeries.add(series);
+      this.render();
+    }));
     this.querySelectorAll("[data-ai-chart-point]").forEach((el) => {
       const show = (event, pin = false) => {
         const card = el.closest("[data-ai-chart]");
@@ -3588,7 +3712,9 @@ class DeyeEnergyManagerCard extends HTMLElement {
         const viewBox = svg.viewBox.baseVal;
         const pointerY = event?.clientY ? (event.clientY - svgRect.top) / svgRect.height * viewBox.height : 150;
         crossX.setAttribute("x1", x); crossX.setAttribute("x2", x);
-        crossY.setAttribute("y1", Math.max(48, Math.min(386, pointerY))); crossY.setAttribute("y2", Math.max(48, Math.min(386, pointerY)));
+        const hitTop = Number(el.getAttribute("y")) || 48;
+        const hitBottom = hitTop + (Number(el.getAttribute("height")) || 338);
+        crossY.setAttribute("y1", Math.max(hitTop, Math.min(hitBottom, pointerY))); crossY.setAttribute("y2", Math.max(hitTop, Math.min(hitBottom, pointerY)));
         crossX.classList.add("visible"); crossY.classList.add("visible");
         const cardRect = card.getBoundingClientRect();
         const pointerX = event?.clientX || cardRect.left + cardRect.width / 2;
