@@ -28,6 +28,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             DeyeManagerBinarySensor(runtime, "charge_allowed", "Charge allowed", lambda r: r.charge_allowed),
             DeyeManagerBinarySensor(runtime, "soc_guard_ok", "SOC guard OK", lambda r: r.soc_ok),
             DeyeManagerBinarySensor(runtime, "price_guard_ok", "Price guard OK", lambda r: r.price_ok),
-            DeyeManagerBinarySensor(runtime, "scheduler_running", "Scheduler running", lambda r: r.scheduler_enabled and r.active_slot.enabled and r.sell_allowed),
+            DeyeManagerBinarySensor(
+                runtime,
+                "scheduler_running",
+                "Scheduler running",
+                lambda r: r.scheduler_enabled
+                and r.active_slot.enabled
+                and r.data_available
+                and not r.emergency_stop
+                and r.control_mode == "Schedule",
+            ),
         ]
     )

@@ -894,7 +894,8 @@ class DeyeEnergyManagerCard extends HTMLElement {
       dischargeCurrent: this.slotEntity("number", key, label, [`slot_${key}_discharge_current`, `${key}_discharge_current`], ["discharge", "current"]),
       chargeCurrent: this.slotEntity("number", key, label, [`slot_${key}_charge_current`, `${key}_charge_current`], ["charge", "current"], ["discharge"]),
       gridChargeCurrent: this.slotEntity("number", key, label, [`slot_${key}_grid_charge_current`, `${key}_grid_charge_current`], ["grid", "charge", "current"]),
-      minSoc: this.slotEntity("number", key, label, [`slot_${key}_min_soc`, `${key}_min_soc`], ["minimum", "soc"]),
+      minimumSellSoc: this.slotEntity("number", key, label, [`slot_${key}_minimum_sell_soc`, `${key}_minimum_sell_soc`], ["minimum", "sell", "soc"]),
+      touSoc: this.slotEntity("number", key, label, [`slot_${key}_tou_soc`, `${key}_tou_soc`], ["tou", "soc"]),
       minSellPrice: this.slotEntity("number", key, label, [`slot_${key}_min_sell_price`, `${key}_min_sell_price`], ["minimum", "sell", "price"]),
     };
   }
@@ -916,13 +917,13 @@ class DeyeEnergyManagerCard extends HTMLElement {
     return `<button type="button" class="pill ${state}" data-slot-grid-charge="${key}" data-grid-entity="${entities.chargeEnabled}">${state === "on" ? "tak" : "nie"}</button>`;
   }
 
-  async setSlotGridCharge(key, entities, enabled, gridChargeCurrent = null, minSoc = null, refresh = true) {
+  async setSlotGridCharge(key, entities, enabled, gridChargeCurrent = null, touSoc = null, refresh = true) {
     this._slotGridChargeOptimistic[key] = Boolean(enabled);
     if (refresh) this.render();
     try {
       const data = { slot_key: key, enabled: Boolean(enabled) };
       if (gridChargeCurrent !== null) data.grid_charge_current = Number(gridChargeCurrent);
-      if (minSoc !== null) data.min_soc = Number(minSoc);
+      if (touSoc !== null) data.tou_soc = Number(touSoc);
       if (this.hasService("deye_energy_manager", "set_slot_grid_charge")) {
         await this.callService("deye_energy_manager", "set_slot_grid_charge", data);
       } else {
@@ -931,8 +932,8 @@ class DeyeEnergyManagerCard extends HTMLElement {
         if (gridChargeCurrent !== null && this.exists(entities.gridChargeCurrent)) {
           await this.setNumber(entities.gridChargeCurrent, Number(gridChargeCurrent));
         }
-        if (minSoc !== null && this.exists(entities.minSoc)) {
-          await this.setNumber(entities.minSoc, Number(minSoc));
+        if (touSoc !== null && this.exists(entities.touSoc)) {
+          await this.setNumber(entities.touSoc, Number(touSoc));
         }
         if (this.exists(entities.chargeEnabled)) {
           await this.turnSwitch(entities.chargeEnabled, enabled);
@@ -979,7 +980,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
       if (this.exists(tou.start)) {
         await this.setTime(tou.start, `${String(item.start).padStart(2, "0")}:00`);
       }
-      if (this.exists(tou.soc)) await this.setNumber(tou.soc, item.minSoc);
+      if (this.exists(tou.soc)) await this.setNumber(tou.soc, item.touSoc);
       if (this.exists(tou.grid)) await this.turnSwitch(tou.grid, Boolean(item.chargeEnabled));
     }
     const activeKey = this.state(this.entity("sensor", "active_slot"));
@@ -1660,8 +1661,8 @@ class DeyeEnergyManagerCard extends HTMLElement {
     const gridChargeValue = this.rawValue("multi-grid-charge", "off") === "on";
     const gridChargeCurrent = this.rawValue("multi-grid-charge-current", 0);
     const minSoc = this.rawValue("multi-min-soc", 40);
+    const touSoc = this.rawValue("multi-tou-soc", 40);
     const minSellPrice = this.rawValue("multi-min-sell-price", 0);
-    const forceGridCharge = checked("mode") && mode === "Charge";
 
     const updates = selected.map(([key]) => {
       const update = { slot_key: key };
@@ -1669,11 +1670,12 @@ class DeyeEnergyManagerCard extends HTMLElement {
       if (checked("dischargeCurrent")) update.discharge_current = dischargeCurrent;
       if (checked("chargeCurrent")) update.charge_current = chargeCurrent;
       if (checked("gridChargeCurrent")) update.grid_charge_current = gridChargeCurrent;
-      if (checked("minSoc")) update.min_soc = minSoc;
+      if (checked("minSoc")) update.minimum_sell_soc = minSoc;
+      if (checked("touSoc")) update.tou_soc = touSoc;
       if (checked("minSellPrice")) update.min_sell_price = minSellPrice;
       if (checked("mode")) update.mode = mode;
-      if (checked("active") || forceGridCharge) update.enabled = forceGridCharge || activeValue;
-      if (checked("gridCharge") || forceGridCharge) update.charge_enabled = forceGridCharge || gridChargeValue;
+      if (checked("active")) update.enabled = activeValue;
+      if (checked("gridCharge")) update.charge_enabled = gridChargeValue;
       return update;
     });
     if (!await this.applySchedulePatch(updates)) return;
@@ -1924,7 +1926,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
     const sell = this.numberState(entities.sellPower, 0);
     const discharge = this.numberState(entities.dischargeCurrent, 0);
     const charge = this.numberState(entities.chargeCurrent, 0);
-    const soc = this.numberState(entities.minSoc, 0);
+    const soc = this.numberState(entities.minimumSellSoc, 0);
     return `
       <span class="metric sell">${this.iconSvg("sell")} ${sell} W</span>
       <span class="metric discharge">\u2193 ${discharge} A</span>
@@ -1959,7 +1961,8 @@ class DeyeEnergyManagerCard extends HTMLElement {
         chargeCurrent: 0,
         gridCharge: "off",
         gridChargeCurrent: 0,
-        minSoc: 0,
+        minimumSellSoc: 0,
+        touSoc: 0,
         minSellPrice: 0,
       };
     }
@@ -1972,7 +1975,8 @@ class DeyeEnergyManagerCard extends HTMLElement {
       chargeCurrent: this.numberState(entities.chargeCurrent, 0),
       gridCharge: this.displayState(entities.chargeEnabled, "off") === "on" ? "on" : "off",
       gridChargeCurrent: this.numberState(entities.gridChargeCurrent, 0),
-      minSoc: this.numberState(entities.minSoc, 0),
+      minimumSellSoc: this.numberState(entities.minimumSellSoc, 0),
+      touSoc: this.numberState(entities.touSoc, 0),
       minSellPrice: this.numberState(entities.minSellPrice, 0),
     };
   }
@@ -1988,7 +1992,8 @@ class DeyeEnergyManagerCard extends HTMLElement {
       "multi-charge-current": bulk.chargeCurrent,
       "multi-grid-charge": bulk.gridCharge,
       "multi-grid-charge-current": bulk.gridChargeCurrent,
-      "multi-min-soc": bulk.minSoc,
+      "multi-min-soc": bulk.minimumSellSoc,
+      "multi-tou-soc": bulk.touSoc,
       "multi-min-sell-price": bulk.minSellPrice,
     };
     Object.entries(values).forEach(([name, value]) => {
@@ -2015,15 +2020,16 @@ class DeyeEnergyManagerCard extends HTMLElement {
         dischargeCurrent: this.asNumber(this.numberState(entities.dischargeCurrent, 0)) || 0,
         chargeCurrent: this.asNumber(this.numberState(entities.chargeCurrent, 0)) || 0,
         gridChargeCurrent: this.asNumber(this.numberState(entities.gridChargeCurrent, 0)) || 0,
-        minSoc: this.asNumber(this.numberState(entities.minSoc, 0)) || 0,
+        minimumSellSoc: this.asNumber(this.numberState(entities.minimumSellSoc, 0)) || 0,
+        touSoc: this.asNumber(this.numberState(entities.touSoc, 0)) || 0,
         minSellPrice: this.asNumber(this.numberState(entities.minSellPrice, 0)) || 0,
-        chargeEnabled: enabled && (chargeEnabled || this.norm(mode).includes("charge")),
+        chargeEnabled: enabled && chargeEnabled,
       };
       return data;
     });
     // Fizyczne sloty Deye Time of Use przechowuja granice czasu, SOC i Grid Charge.
     // Pozostale parametry harmonogramu sa stosowane godzinowo przez manager.
-    const same = (a, b) => ["minSoc", "chargeEnabled"].every((key) => a[key] === b[key]);
+    const same = (a, b) => ["touSoc", "chargeEnabled"].every((key) => a[key] === b[key]);
     const segments = [];
     rows.forEach((row) => {
       if (segments.length && same(segments[segments.length - 1], row)) {
@@ -2257,7 +2263,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
         return {
         key, label, enabled: true, mode: "Selling First", chargeEnabled: false,
         sellPower, dischargeCurrent: settings.maxDischargeCurrent,
-        chargeCurrent: 0, gridChargeCurrent: 0, minSoc: settings.minSoc, minSellPrice: settings.minSellPrice,
+        chargeCurrent: 0, gridChargeCurrent: 0, minSoc: settings.minSoc, minimumSellSoc: settings.minSoc, touSoc: settings.minSoc, minSellPrice: settings.minSellPrice,
         energyKwh, projectedSoc: Math.max(Number(settings.minSoc) || 0, projectedStoredKwh / ai.batteryCapacityKwh * 100),
         estimatedRevenue: energyKwh * (sellPrices.get(hour) || 0), confidence,
       };
@@ -2268,7 +2274,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
         return {
         key, label, enabled: true, mode: "Charge", chargeEnabled: true,
         sellPower: 0, dischargeCurrent: 0, chargeCurrent: settings.maxChargeCurrent,
-        gridChargeCurrent: settings.maxGridChargeCurrent, minSoc: settings.targetSoc, minSellPrice: 0,
+        gridChargeCurrent: settings.maxGridChargeCurrent, minSoc: settings.targetSoc, minimumSellSoc: 0, touSoc: settings.targetSoc, minSellPrice: 0,
         energyKwh: chargeEnergyKwh, projectedSoc: projectedStoredKwh / ai.batteryCapacityKwh * 100,
         estimatedRevenue: -chargeEnergyKwh * (buyPrices.get(hour) || 0), confidence,
       };
@@ -2299,7 +2305,8 @@ class DeyeEnergyManagerCard extends HTMLElement {
         discharge_current: Number(row.dischargeCurrent) || 0,
         charge_current: Number(row.chargeCurrent) || 0,
         grid_charge_current: Number(row.gridChargeCurrent) || 0,
-        min_soc: Number(row.minSoc) || 0,
+        minimum_sell_soc: Number(row.minimumSellSoc ?? row.minSoc) || 0,
+        tou_soc: Number(row.touSoc ?? row.minSoc) || 0,
         min_sell_price: Number(row.minSellPrice) || 0,
       } : {}),
     }));
@@ -2379,7 +2386,8 @@ class DeyeEnergyManagerCard extends HTMLElement {
       discharge_current: selling ? Number(settings.maxDischargeCurrent) || 0 : 0,
       charge_current: charging ? Number(settings.maxChargeCurrent) || 0 : 0,
       grid_charge_current: charging ? Number(settings.maxGridChargeCurrent) || 0 : 0,
-      min_soc: charging ? Number(settings.targetSoc) || 0 : Number(settings.minSoc) || 0,
+      minimum_sell_soc: selling ? Number(settings.minSoc) || 0 : 0,
+      tou_soc: charging ? Number(settings.targetSoc) || 0 : Number(settings.minSoc) || 0,
       min_sell_price: selling ? Number(settings.minSellPrice) || 0 : 0,
     };
   }
@@ -3230,7 +3238,8 @@ class DeyeEnergyManagerCard extends HTMLElement {
             <label class="apply-row"><input type="checkbox" data-apply-field="chargeCurrent" checked> Prąd ładowania ${this.rawNumber("multi-charge-current", bulk.chargeCurrent, "A")}</label>
             <label class="apply-row"><input type="checkbox" data-apply-field="gridCharge" checked> Ładowanie z sieci ${this.rawSelect("multi-grid-charge", [["on", "tak"], ["off", "nie"]], bulk.gridCharge)}</label>
             <label class="apply-row"><input type="checkbox" data-apply-field="gridChargeCurrent" checked> Prąd z sieci ${this.rawNumber("multi-grid-charge-current", bulk.gridChargeCurrent, "A")}</label>
-            <label class="apply-row"><input type="checkbox" data-apply-field="minSoc" checked> Minimalny SOC ${this.rawNumber("multi-min-soc", bulk.minSoc, "%")}</label>
+            <label class="apply-row"><input type="checkbox" data-apply-field="minSoc" checked> Minimalny SOC sprzedaży ${this.rawNumber("multi-min-soc", bulk.minimumSellSoc, "%")}</label>
+            <label class="apply-row"><input type="checkbox" data-apply-field="touSoc" checked> SOC TOU Deye ${this.rawNumber("multi-tou-soc", bulk.touSoc, "%")}</label>
             <label class="apply-row"><input type="checkbox" data-apply-field="minSellPrice" checked> Sprzedawaj od ceny ${this.rawNumber("multi-min-sell-price", bulk.minSellPrice, "PLN")}</label>
             <div class="preview-box"><strong>Podgląd zmian</strong><br>Wartości startowe są pobrane z pierwszej zaznaczonej godziny. Odznacz pole, którego nie chcesz zmieniać.</div>
           </div>
@@ -3274,7 +3283,8 @@ class DeyeEnergyManagerCard extends HTMLElement {
           ${this.row("Prąd ładowania baterii", this.numberInput(entities.chargeCurrent, "A"))}
           ${this.row("Ładowanie z sieci", this.slotGridChargePill(key, entities))}
           ${this.row("Prąd ładowania z sieci", this.numberInput(entities.gridChargeCurrent, "A"))}
-          ${this.row("Minimalny SOC", this.numberInput(entities.minSoc, "%"))}
+          ${this.row("Minimalny SOC sprzedaży", this.numberInput(entities.minimumSellSoc, "%"))}
+          ${this.row("SOC TOU Deye", this.numberInput(entities.touSoc, "%"))}
           ${this.row("Sprzedawaj od ceny", this.numberInput(entities.minSellPrice, "PLN"))}
         </div>
         <div class="dialog-actions"><button type="button" data-close-dialog="1">Zamknij</button></div>
@@ -3351,7 +3361,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
         <td data-label="Prąd ładowania" class="metric charge">${enabled ? `↑ ${this.numberState(entities.chargeCurrent)} A` : "-"}</td>
         <td data-label="Ładowanie z sieci" class="metric grid">${enabled ? this.slotGridChargePill(key, entities) : "-"}</td>
         <td data-label="Prąd z sieci" class="metric grid-current">${enabled ? `⚡ ${this.numberState(entities.gridChargeCurrent)} A` : "-"}</td>
-        <td data-label="Min. SOC" class="metric soc">${enabled ? `◇ ${this.numberState(entities.minSoc)}%` : "-"}</td>
+        <td data-label="Min. SOC sprzedaży" class="metric soc">${enabled ? `◇ ${this.numberState(entities.minimumSellSoc)}%` : "-"}</td>
         <td data-label="Cena min." class="metric price-limit">${enabled ? `${this.formatPrice(this.numberState(entities.minSellPrice))} PLN` : "-"}</td>
         <td data-label="Aktywne">${this.pill(entities.sellEnabled, enabled ? "ON" : "OFF")}</td>
         <td data-label="Akcja"><button class="icon-only" data-open-slot="sell:${key}" title="Edytuj">${this.iconSvg("edit")}</button></td>
@@ -3372,7 +3382,8 @@ class DeyeEnergyManagerCard extends HTMLElement {
       <label class="apply-row"><input type="checkbox" data-apply-field="chargeCurrent" checked><span>Prąd ładowania</span>${this.rawNumber("multi-charge-current", bulk.chargeCurrent, "A")}</label>
       <label class="apply-row"><input type="checkbox" data-apply-field="gridCharge" checked><span>Ładowanie z sieci</span>${this.rawSelect("multi-grid-charge", [["on", "tak"], ["off", "nie"]], bulk.gridCharge)}</label>
       <label class="apply-row"><input type="checkbox" data-apply-field="gridChargeCurrent" checked><span>Prąd z sieci</span>${this.rawNumber("multi-grid-charge-current", bulk.gridChargeCurrent, "A")}</label>
-      <label class="apply-row"><input type="checkbox" data-apply-field="minSoc" checked><span>Minimalny SOC</span>${this.rawNumber("multi-min-soc", bulk.minSoc, "%")}</label>
+      <label class="apply-row"><input type="checkbox" data-apply-field="minSoc" checked><span>Minimalny SOC sprzedaży</span>${this.rawNumber("multi-min-soc", bulk.minimumSellSoc, "%")}</label>
+      <label class="apply-row"><input type="checkbox" data-apply-field="touSoc" checked><span>SOC TOU Deye</span>${this.rawNumber("multi-tou-soc", bulk.touSoc, "%")}</label>
       <label class="apply-row"><input type="checkbox" data-apply-field="minSellPrice" checked><span>Sprzedawaj od ceny</span>${this.rawNumber("multi-min-sell-price", bulk.minSellPrice, "PLN")}</label>
       <div class="preview-box"><strong>Podgląd zmian</strong><br>Wybrane pola zostaną wpisane tylko do zaznaczonych godzin. Pola bez znacznika zostają bez zmian.</div>
       <div class="bulk-actions"><button data-schedule-clear="1">${this.iconSvg("close")} Anuluj</button><button class="primary" data-apply-multi="1">${this.iconSvg("check")} Zastosuj zmiany</button></div>
@@ -3591,7 +3602,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
           entities,
           enabled,
           this.numberState(entities.gridChargeCurrent, 0),
-          this.numberState(entities.minSoc, 0),
+          this.numberState(entities.touSoc, 0),
         );
       });
     });
@@ -3606,20 +3617,9 @@ class DeyeEnergyManagerCard extends HTMLElement {
     });
     this.querySelectorAll("[data-select]").forEach((el) => {
       el.value = this.state(el.dataset.select);
-      el.onchange = async () => {
-        await this.setSelect(el.dataset.select, el.value);
-        if (el.value !== "Charge") return;
-        const slot = slots.find(([key, label]) => this.slotEntities(key, label).mode === el.dataset.select);
-        if (!slot) return;
-        const entities = this.slotEntities(slot[0], slot[1]);
-        await this.setSlotGridCharge(
-          slot[0],
-          entities,
-          true,
-          this.numberState(entities.gridChargeCurrent, 0),
-          this.numberState(entities.minSoc, 0),
-        );
-      };
+      // Charge is a work-mode choice. Grid: yes remains a separate,
+      // explicit consent and must never be inferred from this selection.
+      el.onchange = () => this.setSelect(el.dataset.select, el.value);
     });
     this.querySelectorAll("[data-time]").forEach((el) => {
       el.onchange = () => this.setTime(el.dataset.time, el.value);

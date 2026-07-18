@@ -120,7 +120,12 @@ class SlotSettings:
     charge_enabled: bool = False
     charge_current: float = 0
     grid_charge_current: float = 0
-    min_soc: float = 0
+    # These values have deliberately different meanings.  ``tou_soc`` is
+    # written to a physical Deye Time Of Use range, while
+    # ``minimum_sell_soc`` is used only to decide whether Selling First is
+    # allowed for this logical hour.
+    tou_soc: float = 0
+    minimum_sell_soc: float = 0
     min_sell_price: float = 0
 
 
@@ -133,7 +138,6 @@ class DeyeEnergyManagerRuntime:
     soc_guard_enabled: bool = True
     price_guard_enabled: bool = False
     emergency_stop: bool = False
-    charge_scheduler_enabled: bool = False
     control_mode: str = "Schedule"
     min_sell_soc: float = 30
     price_sell_threshold: float = 0
@@ -184,6 +188,7 @@ class DeyeEnergyManagerRuntime:
     unsub_timer: Any = None
     entities: list[Any] = field(default_factory=list)
     _last_tou_signature: str = ""
+    _last_slot_failure_signature: str = ""
     _operation_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     def __post_init__(self) -> None:
@@ -789,11 +794,19 @@ class DeyeEnergyManagerRuntime:
 
     @property
     def data_available(self) -> bool:
-        required = [self.work_mode_select, self.max_sell_power_number, self.discharge_current_number]
-        if self.soc_guard_enabled:
-            required.append(self.battery_soc_sensor)
-        if self.active_min_sell_price > 0:
-            required.append(self.price_sensor)
+        """Check only entities required to write a complete Deye control plan.
+
+        SOC and price are conditions of Selling First, not a global data
+        interlock.  A Zero Export slot must therefore remain executable when
+        price data is absent.
+        """
+        required = [
+            self.work_mode_select,
+            self.max_sell_power_number,
+            self.discharge_current_number,
+            self.charge_current_number,
+            self.grid_charge_current_number,
+        ]
         return all(self.entity_available(entity_id) for entity_id in required)
 
     @property
@@ -1016,15 +1029,22 @@ class DeyeEnergyManagerRuntime:
             "discharge_current": (0.0, 240.0),
             "charge_current": (0.0, 240.0),
             "grid_charge_current": (0.0, 240.0),
-            "min_soc": (0.0, 100.0),
+            "tou_soc": (0.0, 100.0),
+            "minimum_sell_soc": (0.0, 100.0),
             "min_sell_price": (0.0, 5.0),
         }
         allowed = {"slot_key", "enabled", "charge_enabled", "mode", *numeric_limits}
         normalized: list[dict[str, Any]] = []
         seen: set[str] = set()
         for raw in updates:
+            raw = dict(raw) if isinstance(raw, dict) else raw
             if not isinstance(raw, dict):
                 raise ValueError("Każda pozycja planu musi być obiektem")
+            if "min_soc" in raw:
+                legacy_soc = raw.pop("min_soc")
+                raw.setdefault("tou_soc", legacy_soc)
+                if raw.get("mode") == MODE_SELLING_FIRST:
+                    raw.setdefault("minimum_sell_soc", legacy_soc)
             unknown = set(raw) - allowed
             if unknown:
                 raise ValueError(f"Nieobsługiwane pola planu: {', '.join(sorted(unknown))}")
@@ -1106,15 +1126,19 @@ class DeyeEnergyManagerRuntime:
                 await self.async_apply_safe_defaults("Plan na jutro wygasł przed zastosowaniem")
             return
         try:
-            if not self.entity_available(self.battery_soc_sensor):
-                raise RuntimeError("brak poprawnego odczytu SOC")
             updates = self._validate_future_plan_updates(plan.get("updates"))
-            selling = any(item.get("mode") == MODE_SELLING_FIRST for item in updates)
-            charging = any(item.get("mode") == MODE_CHARGE or item.get("charge_enabled") for item in updates)
-            if selling and not self.entity_available(self.price_sensor):
+            selling_needing_soc = any(
+                item.get("mode") == MODE_SELLING_FIRST and self.safe_float(item.get("minimum_sell_soc"), 0) > 0
+                for item in updates
+            )
+            selling_needing_price = any(
+                item.get("mode") == MODE_SELLING_FIRST and self.safe_float(item.get("min_sell_price"), 0) > 0
+                for item in updates
+            )
+            if selling_needing_soc and self.state_float_or_none(self.battery_soc_sensor) is None:
+                raise RuntimeError("brak poprawnego odczytu SOC dla sprzedaży")
+            if selling_needing_price and self.state_float_or_none(self.price_sensor) is None:
                 raise RuntimeError("brak ceny sprzedaży")
-            if charging and not self.entity_available(self.buy_price_today_sensor):
-                raise RuntimeError("brak ceny zakupu")
             await self.async_apply_schedule_patch(updates)
             self.future_plan = {
                 **plan,
@@ -1838,8 +1862,13 @@ class DeyeEnergyManagerRuntime:
 
     @property
     def active_min_sell_soc(self) -> float:
-        if self.control_mode == "Schedule" and self.active_slot.enabled and self.active_slot.min_soc > 0:
-            return self.active_slot.min_soc
+        if (
+            self.control_mode == "Schedule"
+            and self.active_slot.enabled
+            and self.active_slot.mode == MODE_SELLING_FIRST
+            and self.active_slot.minimum_sell_soc > 0
+        ):
+            return self.active_slot.minimum_sell_soc
         return self.min_sell_soc
 
     @property
@@ -1850,7 +1879,7 @@ class DeyeEnergyManagerRuntime:
 
     @property
     def soc_ok(self) -> bool:
-        if not self.soc_guard_enabled:
+        if not self.soc_guard_enabled or self.active_min_sell_soc <= 0:
             return True
         soc = self.state_float_or_none(self.battery_soc_sensor)
         return soc is not None and 0 <= soc <= 100 and soc >= self.active_min_sell_soc
@@ -1874,16 +1903,12 @@ class DeyeEnergyManagerRuntime:
 
     @property
     def charge_allowed(self) -> bool:
-        if (
-            self.emergency_stop
-            or not self.data_available
-            or not self.entity_available(self.charge_current_number)
-            or not self.entity_available(self.grid_charge_current_number)
-        ):
-            return False
-        if self.control_mode == "Charge Battery":
-            return True
-        return self.control_mode == "Schedule" and self.charge_scheduler_enabled
+        """Compatibility status for manual charge controls.
+
+        It must not grant grid charging.  Only the active slot's explicit
+        ``charge_enabled`` flag (Grid: tak) can enable Grid Charge in Deye.
+        """
+        return not self.emergency_stop and self.data_available
 
     @property
     def target_mode(self) -> str:
@@ -1891,7 +1916,12 @@ class DeyeEnergyManagerRuntime:
             return MODE_SELLING_FIRST
         if self.control_mode in ("Stop Sell", "Protect Battery", "Charge Battery"):
             return MODE_ZERO_EXPORT
-        if self.control_mode == "Schedule" and self.active_slot.enabled and not self.price_ok:
+        if (
+            self.control_mode == "Schedule"
+            and self.active_slot.enabled
+            and self.active_slot.mode == MODE_SELLING_FIRST
+            and not self.price_ok
+        ):
             return self.default_work_mode
         if self.control_mode == "Schedule" and self.active_slot.enabled and (
             self.active_slot.mode == MODE_CHARGE or self.active_slot.charge_enabled
@@ -1905,7 +1935,7 @@ class DeyeEnergyManagerRuntime:
             return self.manual_sell_power
         if self.control_mode != "Schedule":
             return self.default_sell_power
-        if self.active_slot.enabled and not self.price_ok:
+        if self.active_slot.enabled and self.active_slot.mode == MODE_SELLING_FIRST and not self.price_ok:
             return self.default_sell_power
         if self.active_slot.enabled and (self.active_slot.mode == MODE_CHARGE or self.active_slot.charge_enabled):
             return self.default_sell_power
@@ -1917,7 +1947,7 @@ class DeyeEnergyManagerRuntime:
             return self.manual_discharge_current
         if self.control_mode != "Schedule":
             return self.default_discharge_current
-        if self.active_slot.enabled and not self.price_ok:
+        if self.active_slot.enabled and self.active_slot.mode == MODE_SELLING_FIRST and not self.price_ok:
             return self.default_discharge_current
         if self.active_slot.enabled and (self.active_slot.mode == MODE_CHARGE or self.active_slot.charge_enabled):
             return self.default_discharge_current
@@ -1927,7 +1957,12 @@ class DeyeEnergyManagerRuntime:
     def target_charge_current(self) -> float:
         if self.control_mode == "Charge Battery":
             return self.manual_charge_current
-        if self.control_mode == "Schedule" and self.active_slot.enabled and not self.price_ok:
+        if (
+            self.control_mode == "Schedule"
+            and self.active_slot.enabled
+            and self.active_slot.mode == MODE_SELLING_FIRST
+            and not self.price_ok
+        ):
             return self.default_charge_current
         if self.control_mode == "Schedule" and self.active_slot.enabled:
             return (
@@ -1960,11 +1995,11 @@ class DeyeEnergyManagerRuntime:
                 return "SLOT DISABLED"
             if self.last_schedule_attempt.get("status") == "failed" and self.last_schedule_attempt.get("slot") == self.active_slot_key():
                 return "SCHEDULE APPLY ERROR"
-            if not self.soc_ok:
+            if self.active_slot.mode == MODE_SELLING_FIRST and not self.soc_ok:
                 return "SOC TOO LOW"
-            if not self.price_ok:
+            if self.active_slot.mode == MODE_SELLING_FIRST and not self.price_ok:
                 return "PRICE TOO LOW"
-            if self.active_slot.mode == MODE_CHARGE or self.active_slot.charge_enabled:
+            if self.active_slot.charge_enabled:
                 return "GRID CHARGE ACTIVE"
             if self.active_slot.mode == MODE_SELLING_FIRST:
                 return "SELLING ACTIVE"
@@ -1995,6 +2030,57 @@ class DeyeEnergyManagerRuntime:
             time_value = value if len(value) == 8 else f"{value}:00"
             await self.hass.services.async_call("time", "set_value", {"entity_id": entity_id, "time": time_value}, blocking=True)
 
+    def _validate_number_entity(self, label: str, entity_id: str | None, value: float) -> None:
+        """Validate a Number entity and its Home Assistant limits before write."""
+        if not entity_id or not entity_id.startswith("number."):
+            raise ValueError(f"Missing required Deye number entity: {label}")
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state in ("unknown", "unavailable", "none", ""):
+            raise ValueError(f"Unavailable Deye number entity: {label}")
+        numeric = float(value)
+        if not math.isfinite(numeric):
+            raise ValueError(f"Invalid numeric value for {label}")
+        attrs = getattr(state, "attributes", {}) or {}
+        minimum = self.safe_float(attrs.get("min"), float("-inf"))
+        maximum = self.safe_float(attrs.get("max"), float("inf"))
+        step = self.safe_float(attrs.get("step"), 0)
+        if numeric < minimum or numeric > maximum:
+            raise ValueError(f"{label} must be between {minimum:g} and {maximum:g}")
+        if step > 0 and math.isfinite(minimum):
+            steps = (numeric - minimum) / step
+            if not math.isclose(steps, round(steps), abs_tol=1e-6):
+                raise ValueError(f"{label} must follow step {step:g}")
+
+    def _validate_select_entity(self, label: str, entity_id: str | None, option: str) -> None:
+        if not entity_id or not entity_id.startswith("select."):
+            raise ValueError(f"Missing required Deye select entity: {label}")
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state in ("unknown", "unavailable", "none", ""):
+            raise ValueError(f"Unavailable Deye select entity: {label}")
+        options = (getattr(state, "attributes", {}) or {}).get("options")
+        if isinstance(options, (list, tuple)) and option not in options:
+            raise ValueError(f"Unsupported option for {label}: {option}")
+
+    def _validate_switch_entity(self, label: str, entity_id: str | None) -> None:
+        if not entity_id or not entity_id.startswith("switch."):
+            raise ValueError(f"Missing required Deye switch entity: {label}")
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state not in ("on", "off"):
+            raise ValueError(f"Unavailable Deye switch entity: {label}")
+
+    def _validate_time_entity(self, label: str, entity_id: str | None, value: str) -> None:
+        if not entity_id or not entity_id.startswith("time."):
+            raise ValueError(f"Missing required Deye time entity: {label}")
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state in ("unknown", "unavailable", "none", ""):
+            raise ValueError(f"Unavailable Deye time entity: {label}")
+        try:
+            hour, minute = (int(part) for part in value.split(":")[:2])
+        except (TypeError, ValueError):
+            raise ValueError(f"Invalid time for {label}: {value}") from None
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            raise ValueError(f"Invalid time for {label}: {value}")
+
     def _validate_control_plan(
         self,
         mode: str,
@@ -2016,14 +2102,17 @@ class DeyeEnergyManagerRuntime:
             value = float(raw_value)
             if not math.isfinite(value) or not minimum <= value <= maximum:
                 raise ValueError(f"{label} must be between {minimum:g} and {maximum:g}")
-        required_entities = {
-            "System Work Mode": self.work_mode_select,
-            "Max Sell Power": self.max_sell_power_number,
-            "Maximum Battery Discharge Current": self.discharge_current_number,
-        }
-        for label, entity_id in required_entities.items():
-            if not entity_id or self.hass.states.get(entity_id) is None:
-                raise ValueError(f"Missing required Deye entity: {label}")
+        self._validate_select_entity("System Work Mode", self.work_mode_select, mode)
+        self._validate_number_entity("Max Sell Power", self.max_sell_power_number, sell_power)
+        self._validate_number_entity(
+            "Maximum Battery Discharge Current", self.discharge_current_number, discharge_current
+        )
+        self._validate_number_entity(
+            "Maximum Battery Charge Current", self.charge_current_number, charge_current
+        )
+        self._validate_number_entity(
+            "Maximum Battery Grid Charge Current", self.grid_charge_current_number, grid_charge_current
+        )
 
     async def async_verify_control_values(
         self, mode: str | None, sell_power: float, discharge_current: float,
@@ -2152,10 +2241,10 @@ class DeyeEnergyManagerRuntime:
         for _key, _label, start, end in SLOTS:
             slot = self.slots[_key]
             mode = slot.mode if slot.enabled else MODE_ZERO_EXPORT
-            grid_charge = bool(
-                slot.enabled
-                and (slot.mode == MODE_CHARGE or slot.charge_enabled)
-            )
+            # Grid: yes is the sole consent to enable Deye Grid Charge.  The
+            # Charge mode and a positive battery charge-current are not grid
+            # charging permissions.
+            grid_charge = bool(slot.enabled and slot.charge_enabled)
             grid_charge_current = float(
                 slot.grid_charge_current
                 if slot.grid_charge_current > 0
@@ -2169,12 +2258,12 @@ class DeyeEnergyManagerRuntime:
                 "discharge_current": float(slot.discharge_current if slot.enabled and not grid_charge else 0),
                 "charge_current": float(slot.charge_current if slot.enabled else 0),
                 "grid_charge_current": grid_charge_current if slot.enabled else 0,
-                "min_soc": float(slot.min_soc if slot.enabled else self.min_sell_soc),
+                "tou_soc": float(slot.tou_soc if slot.enabled else 0),
                 "grid_charge": grid_charge,
             }
-            comparable = {"min_soc": data["min_soc"], "grid_charge": data["grid_charge"]}
+            comparable = {"tou_soc": data["tou_soc"], "grid_charge": data["grid_charge"]}
             previous = (
-                {"min_soc": segments[-1]["min_soc"], "grid_charge": segments[-1]["grid_charge"]}
+                {"tou_soc": segments[-1]["tou_soc"], "grid_charge": segments[-1]["grid_charge"]}
                 if segments
                 else None
             )
@@ -2201,6 +2290,21 @@ class DeyeEnergyManagerRuntime:
             segments[split_index : split_index + 1] = [first, second]
         return segments
 
+    def _tou_grid_state_matches(self, segments: list[dict[str, Any]]) -> bool:
+        """Return whether physical TOU Grid Charge switches match the plan.
+
+        The cached map signature avoids unnecessary writes, but it must never
+        turn ``Grid: nie`` into merely a visual setting.  If an inverter or a
+        user changed a physical Grid Charge switch after the previous write,
+        the next tick writes the intended value again.
+        """
+        for idx in range(1, 7):
+            item = segments[idx - 1] if idx <= len(segments) else None
+            expected = "on" if item and item["grid_charge"] else "off"
+            if self.state_text(self._tou_entity(idx, "grid")) != expected:
+                return False
+        return True
+
     async def async_apply_time_of_use_map(self) -> bool:
         segments = self._compress_schedule_segments()
         if len(segments) > 6:
@@ -2217,21 +2321,46 @@ class DeyeEnergyManagerRuntime:
             return False
 
         signature = "|".join(
-            f"{item['start']}-{item['end']}:{item['mode']}:{item['grid_charge']}:{item['min_soc']}:{item['charge_current']}:{item['grid_charge_current']}"
+            f"{item['start']}-{item['end']}:{item['mode']}:{item['grid_charge']}:{item['tou_soc']}:{item['charge_current']}:{item['grid_charge_current']}"
             for item in segments
         )
-        if signature == self._last_tou_signature:
+        if signature == self._last_tou_signature and self._tou_grid_state_matches(segments):
             return True
 
         try:
+            # Validate the whole physical map before its first write.  A
+            # missing later TOU entity must not leave the earlier ranges
+            # partially updated.
+            self._validate_switch_entity(
+                "Deye Time Of Use", "switch.deye_inverter_time_of_use"
+            )
+            for idx in range(1, 7):
+                item = segments[idx - 1] if idx <= len(segments) else None
+                if item is None:
+                    self._validate_switch_entity(
+                        f"TOU {idx} Grid Charge", self._tou_entity(idx, "grid")
+                    )
+                    continue
+                start_value = f"{int(item['start']):02d}:00"
+                self._validate_time_entity(f"TOU {idx} start", self._tou_entity(idx, "start"), start_value)
+                self._validate_number_entity(f"TOU {idx} SOC", self._tou_entity(idx, "soc"), max(item["tou_soc"], 0))
+                self._validate_switch_entity(f"TOU {idx} Grid Charge", self._tou_entity(idx, "grid"))
+                if item["grid_charge"]:
+                    self._validate_number_entity(
+                        "Maximum Battery Grid Charge Current",
+                        self.grid_charge_current_number,
+                        item["grid_charge_current"],
+                    )
+
             await self.async_set_switch("switch.deye_inverter_time_of_use", True)
             for idx in range(1, 7):
                 item = segments[idx - 1] if idx <= len(segments) else None
                 if item is None:
                     await self.async_set_switch(self._tou_entity(idx, "grid"), False)
                     continue
-                await self.async_set_time(self._tou_entity(idx, "start"), f"{int(item['start']):02d}:00")
-                await self.async_set_number(self._tou_entity(idx, "soc"), max(item["min_soc"], 0))
+                start_value = f"{int(item['start']):02d}:00"
+                await self.async_set_time(self._tou_entity(idx, "start"), start_value)
+                await self.async_set_number(self._tou_entity(idx, "soc"), max(item["tou_soc"], 0))
                 await self.async_set_switch(self._tou_entity(idx, "grid"), bool(item["grid_charge"]))
                 if item["grid_charge"]:
                     await self.async_set_number(self.grid_charge_current_number, item["grid_charge_current"])
@@ -2257,7 +2386,7 @@ class DeyeEnergyManagerRuntime:
             if not await self.async_apply_time_of_use_map():
                 raise RuntimeError(self.last_error or "Błąd zapisu Deye Time Of Use")
             slot = self.slots[slot_key]
-            if slot.enabled and (slot.mode == MODE_CHARGE or slot.charge_enabled):
+            if slot.enabled and slot.charge_enabled:
                 current = slot.grid_charge_current if slot.grid_charge_current > 0 else self.default_grid_charge_current
                 await self.async_set_switch("switch.deye_inverter_time_of_use", True)
                 await self.async_set_number(self.grid_charge_current_number, current)
@@ -2265,7 +2394,7 @@ class DeyeEnergyManagerRuntime:
                     await self.async_set_number(self.charge_current_number, slot.charge_current)
                     self.last_action = (
                         f"Ładowanie z sieci {slot.label}: {current:g} A, "
-                        f"SOC {slot.min_soc:g}%"
+                        f"SOC TOU {slot.tou_soc:g}%"
                     )
             self.last_error = ""
             self.mark_settings_applied()
@@ -2285,7 +2414,8 @@ class DeyeEnergyManagerRuntime:
             "discharge_current": (0.0, 240.0),
             "charge_current": (0.0, 240.0),
             "grid_charge_current": (0.0, 240.0),
-            "min_soc": (0.0, 100.0),
+            "tou_soc": (0.0, 100.0),
+            "minimum_sell_soc": (0.0, 100.0),
             "min_sell_price": (0.0, 5.0),
         }
         allowed_fields = {"enabled", "charge_enabled", "mode", *numeric_limits}
@@ -2293,14 +2423,19 @@ class DeyeEnergyManagerRuntime:
         async with self._operation_lock:
             previous_slots = {key: replace(slot) for key, slot in self.slots.items()}
             previous_scheduler = self.scheduler_enabled
-            previous_charge_scheduler = self.charge_scheduler_enabled
             try:
                 for update in updates:
+                    update = dict(update) if isinstance(update, dict) else update
                     if not isinstance(update, dict):
                         raise ValueError("Each schedule update must be an object")
                     slot_key = str(update.get("slot_key") or "")
                     if slot_key not in self.slots:
                         raise ValueError(f"Unknown schedule slot: {slot_key}")
+                    if "min_soc" in update:
+                        legacy_soc = update.pop("min_soc")
+                        update.setdefault("tou_soc", legacy_soc)
+                        if update.get("mode") == MODE_SELLING_FIRST:
+                            update.setdefault("minimum_sell_soc", legacy_soc)
                     unknown = set(update) - allowed_fields - {"slot_key"}
                     if unknown:
                         raise ValueError(f"Unsupported schedule fields: {', '.join(sorted(unknown))}")
@@ -2311,7 +2446,6 @@ class DeyeEnergyManagerRuntime:
                         slot.charge_enabled = bool(update["charge_enabled"])
                         if slot.charge_enabled:
                             slot.enabled = True
-                            self.charge_scheduler_enabled = True
                     if "mode" in update:
                         mode = str(update["mode"])
                         if mode not in SLOT_MODES:
@@ -2319,8 +2453,6 @@ class DeyeEnergyManagerRuntime:
                         slot.mode = mode
                         if mode == MODE_CHARGE:
                             slot.enabled = True
-                            slot.charge_enabled = True
-                            self.charge_scheduler_enabled = True
                     for field_name, (minimum, maximum) in numeric_limits.items():
                         if field_name not in update:
                             continue
@@ -2333,6 +2465,7 @@ class DeyeEnergyManagerRuntime:
 
                 if any(slot.enabled for slot in self.slots.values()):
                     self.scheduler_enabled = True
+                self._last_slot_failure_signature = ""
                 if self.mapping_error:
                     raise ValueError(
                         f"Mapowanie wymaga {len(self._compress_schedule_segments())} zakresów; "
@@ -2345,8 +2478,11 @@ class DeyeEnergyManagerRuntime:
             except Exception as err:
                 self.slots = previous_slots
                 self.scheduler_enabled = previous_scheduler
-                self.charge_scheduler_enabled = previous_charge_scheduler
-                await self.async_apply_safe_defaults(f"Błąd zapisu harmonogramu: {err}")
+                # ``_async_tick_impl`` already restores the full defaults when
+                # an active slot fails.  Do not repeat the same inverter
+                # transaction from this outer patch handler.
+                if not self._last_slot_failure_signature:
+                    await self.async_apply_safe_defaults(f"Błąd zapisu harmonogramu: {err}")
                 self.notify_update()
                 raise
 
@@ -2408,26 +2544,102 @@ class DeyeEnergyManagerRuntime:
             self.mark_settings_applied()
             self.notify_update()
 
+    def _slot_failure_fingerprint(self, reason: str) -> str:
+        """Return a stable signature of an active-slot fault.
+
+        This prevents the minute timer from restoring the same defaults over
+        and over.  It changes when the slot, schedule, relevant source state
+        or TOU mapping availability changes.
+        """
+        slot = self.active_slot
+        control_entities = [
+            self.work_mode_select,
+            self.max_sell_power_number,
+            self.discharge_current_number,
+            self.charge_current_number,
+            self.grid_charge_current_number,
+            *self.tou_mapping_errors(),
+        ]
+        # Control values are deliberately represented only by availability:
+        # applying defaults changes their values and must not defeat the
+        # failure latch on the next minute tick.
+        availability = [
+            f"{entity_id}:{self.entity_available(entity_id)}" for entity_id in control_entities if entity_id
+        ]
+        sensor_states = [
+            f"{entity_id}:{self.state_text(entity_id)}"
+            for entity_id in (
+                self.battery_soc_sensor if slot.mode == MODE_SELLING_FIRST else None,
+                self.price_sensor if slot.mode == MODE_SELLING_FIRST and slot.min_sell_price > 0 else None,
+            )
+            if entity_id
+        ]
+        slot_data = (
+            slot.key, slot.enabled, slot.mode, slot.sell_power,
+            slot.discharge_current, slot.charge_current,
+            slot.grid_charge_current, slot.charge_enabled, slot.tou_soc,
+            slot.minimum_sell_soc, slot.min_sell_price,
+        )
+        return repr((self.control_mode, slot_data, tuple(availability), tuple(sensor_states), self.mapping_error))
+
+    def _clear_slot_failure_latch(self) -> None:
+        self._last_slot_failure_signature = ""
+
+    async def _async_handle_slot_failure(
+        self, reason: str, stage: str, expected: dict[str, Any]
+    ) -> bool:
+        signature = self._slot_failure_fingerprint(stage)
+        if signature == self._last_slot_failure_signature:
+            message = f"{reason}. Ustawienia domyślne zostały już zastosowane dla tego samego błędu."
+            self.record_schedule_attempt("failed", stage, expected, message)
+            self.last_error = message
+            self.notify_update()
+            return False
+        self._last_slot_failure_signature = signature
+        self.record_schedule_attempt("failed", stage, expected, reason)
+        await self.async_apply_safe_defaults(reason)
+        return False
+
     async def async_apply_targets(self) -> bool:
         if self.control_mode == "Schedule" and self.mapping_error:
             reason = f"Błąd mapowania: wymagane {len(self._compress_schedule_segments())} zakresów, Deye obsługuje maksymalnie 6"
-            await self.async_apply_safe_defaults(reason)
+            return await self._async_handle_slot_failure(reason, "mapowanie TOU", {})
+        if not self.data_available:
+            return await self._async_handle_slot_failure(
+                "Brak wymaganej encji sterującej Deye", "walidacja encji", {}
+            )
+        if (
+            self.control_mode == "Schedule"
+            and self.active_slot.enabled
+            and self._last_slot_failure_signature
+            and self._last_slot_failure_signature == self._slot_failure_fingerprint("")
+        ):
+            message = "Bieżący slot pozostaje zablokowany po poprzednim błędzie; ustawienia domyślne zostały już zastosowane."
+            self.record_schedule_attempt("failed", "blokada po błędzie", {}, message)
+            self.last_error = message
+            self.notify_update()
             return False
-        sell_requested = self.control_mode == "Manual Sell" or (self.control_mode == "Schedule" and self.active_slot.enabled and self.active_slot.mode == MODE_SELLING_FIRST and not self.active_slot.charge_enabled)
-        charge_requested = self.control_mode == "Charge Battery" or (self.control_mode == "Schedule" and self.active_slot.enabled and (self.active_slot.mode == MODE_CHARGE or self.active_slot.charge_enabled or self.active_slot.charge_current > 0))
+        sell_requested = self.control_mode == "Manual Sell" or (
+            self.control_mode == "Schedule"
+            and self.active_slot.enabled
+            and self.active_slot.mode == MODE_SELLING_FIRST
+        )
         if sell_requested and not self.sell_allowed:
-            await self.async_apply_safe_defaults("Błąd ceny" if not self.price_ok else "Błąd lub brak odczytu SOC")
-            return False
-        if charge_requested and not self.charge_allowed:
-            await self.async_apply_safe_defaults("Ładowanie zablokowane przez ochronę danych")
-            return False
+            reason = "Błąd ceny" if not self.price_ok else "Błąd lub brak odczytu SOC"
+            return await self._async_handle_slot_failure(reason, "warunki sprzedaży", {})
         target_mode = self.target_mode
         target_sell_power = self.target_sell_power
         target_discharge_current = self.target_discharge_current
         target_charge_current = self.target_charge_current
         grid_charge_current = self.default_grid_charge_current
-        if self.active_slot.enabled and (self.active_slot.mode == MODE_CHARGE or self.active_slot.charge_enabled):
-            grid_charge_current = self.active_slot.grid_charge_current if self.active_slot.grid_charge_current > 0 else self.default_grid_charge_current
+        if self.control_mode == "Schedule" and self.active_slot.enabled:
+            # The value is a limit.  It does not enable grid charging; the
+            # physical TOU Grid Charge switch below follows charge_enabled.
+            grid_charge_current = (
+                self.active_slot.grid_charge_current
+                if self.active_slot.grid_charge_current > 0
+                else self.default_grid_charge_current
+            )
         expected = {"System Work Mode": target_mode, "Max Sell Power": target_sell_power, "Prąd rozładowania": target_discharge_current, "Prąd ładowania baterii": target_charge_current, "Prąd ładowania z sieci": grid_charge_current}
         stage = "walidacja planu"
         self.record_schedule_attempt("pending", stage, expected)
@@ -2438,7 +2650,7 @@ class DeyeEnergyManagerRuntime:
                 raise RuntimeError(self.last_error or "Błąd zapisu mapowania TOU")
             stage = "wartości liczbowe"
             await self.async_set_number(self.charge_current_number, target_charge_current)
-            if self.active_slot.enabled and (self.active_slot.mode == MODE_CHARGE or self.active_slot.charge_enabled):
+            if self.control_mode == "Schedule" and self.active_slot.enabled and self.active_slot.charge_enabled:
                 await self.async_set_switch("switch.deye_inverter_time_of_use", True)
             await self.async_set_number(self.grid_charge_current_number, grid_charge_current)
             await self.async_set_number(self.max_sell_power_number, target_sell_power)
@@ -2453,10 +2665,13 @@ class DeyeEnergyManagerRuntime:
                 raise RuntimeError(f"Niepotwierdzone wartości końcowe: {'; '.join(unconfirmed)}")
         except Exception as err:
             message = f"Nieudana transakcja sterująca ({stage}): {err}"
+            if self.control_mode == "Schedule" and self.active_slot.enabled:
+                return await self._async_handle_slot_failure(message, stage, expected)
             self.record_schedule_attempt("failed", stage, expected, message)
             await self.async_apply_safe_defaults(message)
             return False
         self.record_schedule_attempt("applied", stage, expected, "Potwierdzono pełny zestaw ustawień slotu")
+        self._clear_slot_failure_latch()
         self.last_action = f"Applied {self.control_mode}"
         self.last_error = ""
         self.mark_settings_applied()
@@ -2532,7 +2747,7 @@ class DeyeEnergyManagerRuntime:
             self.emergency_stop = False
             self.control_mode = "Schedule"
             self.scheduler_enabled = False
-            self.charge_scheduler_enabled = False
+            self._clear_slot_failure_latch()
             self.last_action = "Zastosowano ustawienia domyślne"
             self.last_error = ""
             self.mark_settings_applied()
@@ -2544,7 +2759,7 @@ class DeyeEnergyManagerRuntime:
             self.emergency_stop = False
             self.control_mode = "Schedule"
             self.scheduler_enabled = True
-            # Keep grid-charge scheduler unchanged: it is a separate user decision.
+            self._clear_slot_failure_latch()
             applied = await self._async_tick_impl()
             if not applied:
                 raise RuntimeError(self.last_error or "Nie udało się zastosować bieżącego slotu harmonogramu")
@@ -2571,9 +2786,11 @@ class DeyeEnergyManagerRuntime:
         if self.emergency_stop:
             return await self.async_apply_safe_defaults("Zatrzymanie awaryjne")
         elif self.control_mode == "Schedule" and self.mapping_error:
-            return await self.async_apply_safe_defaults(
+            return await self._async_handle_slot_failure(
                 f"Błąd mapowania: wymagane {len(self._compress_schedule_segments())} zakresów, "
-                "Deye obsługuje maksymalnie 6"
+                "Deye obsługuje maksymalnie 6",
+                "mapowanie TOU",
+                {},
             )
         elif self.control_mode in ("Manual Sell", "Charge Battery"):
             return await self.async_apply_targets()
@@ -2642,12 +2859,9 @@ class DeyeEnergyManagerRuntime:
             slot = self.slots[slot_key]
             slot.mode = mode
             if mode == MODE_CHARGE:
-                slot.charge_enabled = True
                 slot.enabled = True
                 self.scheduler_enabled = True
-                self.charge_scheduler_enabled = True
-                if slot.grid_charge_current <= 0 and self.default_grid_charge_current > 0:
-                    slot.grid_charge_current = self.default_grid_charge_current
+            self._clear_slot_failure_latch()
             self.notify_update()
 
     def set_default_work_mode(self, mode: str) -> None:

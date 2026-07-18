@@ -13,12 +13,12 @@ Deye Energy Manager jest niestandardową integracją Home Assistant dla falownik
 
 Wersja 0.7.6 koncentruje się na bezpieczeństwie, jakości danych i wygodniejszej konfiguracji:
 
-- brak poprawnego odczytu SOC uruchamia powrót 1:1 do pełnych „Ustawień domyślnych” zamiast przyjmować 100%;
+- brak poprawnego odczytu SOC lub ceny blokuje wyłącznie aktywny slot `Selling First`, gdy dany warunek jest dla niego ustawiony; sloty `Zero Export` działają bez tych danych;
 - zapisy wielopolowe są serializowane; wartości liczbowe są zapisywane i potwierdzane przed ustawieniem wybranego trybu docelowego;
 - harmonogram przekraczający 6 fizycznych zakresów Deye jest odrzucany przed aktywnym sterowaniem;
 - karta stosuje operacje zbiorcze i sugestie przez jedną transakcyjną usługę backendu;
 - dodano walidację trybów, mocy, prądów, SOC i cen;
-- naprawiono działanie ochrony ceny i schedulera ładowania;
+- naprawiono działanie ochrony ceny oraz obsługę slotów ładowania;
 - dodano edycję mapowania encji w opcjach integracji;
 - sensory PV, domu i baterii można mapować bez zmiany kodu;
 - bieżący dzień pokazuje realizację prognozy, a nie przedwczesną „trafność”;
@@ -43,7 +43,8 @@ Pełna lista znajduje się w [CHANGELOG.md](CHANGELOG.md).
 - 24 godzinne sloty sprzedaży i ładowania;
 - tryby `Selling First`, `Zero Export To Load`, `Zero Export To CT` i `Charge`;
 - kompresja harmonogramu do 6 fizycznych slotów Deye Time Of Use;
-- minimalny SOC i minimalna cena sprzedaży dla każdego slotu;
+- niezależne: minimalny SOC sprzedaży oraz fizyczny SOC zakresu Deye Time Of Use;
+- `Grid: tak` jest jedyną zgodą na ładowanie baterii z sieci; `Grid: nie` pozostawia Grid Charge wyłączone;
 - ręczne i zbiorcze edytowanie harmonogramu;
 - inteligentne sugestie Dziś/Jutro bazujące na cenach energii i dystrybucji, Solcast, pogodzie, SOC i wyuczonym profilu zużycia;
 - automatycznie aktualizowany katalog profili dystrybucyjnych PGE, Tauron, Enea, Energa i Stoen;
@@ -62,7 +63,7 @@ Wykresy **Plan na dziś**, **Plan na jutro** i **Plan energii 48h** rozdzielają
 
 Karta pogody korzysta z wybranej encji `weather.*` (domyślnie `weather.forecast_home_2`) oraz usługi Home Assistant `weather.get_forecasts`. Pokazuje warunki bieżące, temperaturę, ciśnienie, wilgotność i wiatr oraz przełączane prognozy dzienną i godzinową. Jeżeli dostawca nie udostępnia osobnej prognozy dziennej, integracja tworzy jej podsumowanie wyłącznie z dostępnych danych godzinowych.
 
-Przycisk **Zaplanuj wybrane na jutro** zapisuje dokładnie zaakceptowane godziny i parametry wraz z datą. Integracja nie zmienia od razu Deye Time Of Use, ponieważ jego sloty powtarzają się codziennie. Po rozpoczęciu właściwego dnia sprawdzane są encje, SOC i wymagane ceny. Poprawny plan jest zastosowany jeden raz; plan nieaktualny lub niemożliwy do bezpiecznego zastosowania jest anulowany, a integracja stosuje pełne **Ustawienia domyślne** 1:1. Integracja nigdy nie przelicza i nie stosuje samodzielnie innego planu niż zatwierdzony przez użytkownika.
+Przycisk **Zaplanuj wybrane na jutro** zapisuje dokładnie zaakceptowane godziny i parametry wraz z datą. Integracja nie zmienia od razu Deye Time Of Use, ponieważ jego sloty powtarzają się codziennie. Po rozpoczęciu właściwego dnia sprawdzane są encje sterujące oraz tylko te warunki SOC i ceny, których wymaga zaakceptowany slot `Selling First`. Poprawny plan jest zastosowany jeden raz; plan nieaktualny lub niemożliwy do bezpiecznego zastosowania jest anulowany, a integracja stosuje pełne **Ustawienia domyślne** 1:1. Integracja nigdy nie przelicza i nie stosuje samodzielnie innego planu niż zatwierdzony przez użytkownika.
 
 ## Wymagania
 
@@ -76,9 +77,10 @@ number.deye_inverter_max_sell_power
 number.deye_inverter_maximum_battery_discharge_current
 number.deye_inverter_maximum_battery_charge_current
 number.deye_inverter_maximum_battery_grid_charge_current
-sensor.deye_inverter_battery
 sensor.deye_inverter_grid_power
 ```
+
+SOC baterii i cena sprzedaży są wymagane wyłącznie dla aktywnego slotu `Selling First`, gdy ustawiono dla niego odpowiedni limit. Nie są wymagane dla `Zero Export`.
 
 Dla funkcji Deye Time Of Use wymagane są również:
 
@@ -134,7 +136,7 @@ Po instalacji mapowanie można zmienić przez **Ustawienia → Urządzenia i us�
 Integracja udostępnia kartę pod adresem:
 
 ```text
-/deye_energy_manager/deye-energy-manager-card.js?v=0767
+/deye_energy_manager/deye-energy-manager-card.js?v=0768
 ```
 
 Jeżeli karta jest instalowana ręcznie, skopiuj:
@@ -146,10 +148,10 @@ www/deye-energy-manager-card.js
 do `/config/www/` i dodaj zasób:
 
 ```text
-/local/deye-energy-manager-card.js?v=0767
+/local/deye-energy-manager-card.js?v=0768
 ```
 
-Po podmianie pliku karty ustaw parametr `v=0767`, przeładuj zasoby Lovelace i wykonaj twarde odświeżenie przeglądarki (`Ctrl + F5`). `0767` jest identyfikatorem szóstej rewizji karty wydania 0.7.6. Wykres 48 h jest pokazany jako dwa czytelne wykresy dobowe bez poziomego przewijania; napisy, pogoda co godzinę i pasy statusu są renderowane poza SVG. Dla karty udostępnianej przez integrację używaj adresu `/deye_energy_manager/...`; adres `/local/...` jest przeznaczony wyłącznie dla pliku skopiowanego ręcznie do `/config/www/`.
+Po podmianie pliku karty ustaw parametr `v=0768`, przeładuj zasoby Lovelace i wykonaj twarde odświeżenie przeglądarki (`Ctrl + F5`). `0768` jest identyfikatorem ósmej rewizji karty wydania 0.7.6. Wykres 48 h jest pokazany jako dwa czytelne wykresy dobowe bez poziomego przewijania; napisy, pogoda co godzinę i pasy statusu są renderowane poza SVG. Dla karty udostępnianej przez integrację używaj adresu `/deye_energy_manager/...`; adres `/local/...` jest przeznaczony wyłącznie dla pliku skopiowanego ręcznie do `/config/www/`.
 
 Konfiguracja karty:
 
@@ -161,16 +163,14 @@ Przykład kompletnego dashboardu znajduje się w `dashboard/energy_manager.yaml`
 
 ## Zasady bezpieczeństwa
 
-- Przy aktywnej ochronie SOC brak poprawnego odczytu baterii uruchamia powrót 1:1 do pełnych **Ustawień domyślnych**.
-- Przy aktywnej ochronie ceny brak poprawnej ceny uruchamia powrót 1:1 do pełnych **Ustawień domyślnych**.
+- Brak poprawnego odczytu SOC albo ceny blokuje `Selling First` tylko wtedy, gdy aktywny slot wymaga minimalnego SOC albo minimalnej ceny sprzedaży. Nie blokuje slotów `Zero Export`.
 - Aktualizacja ustawień zapisuje i potwierdza wartości liczbowe przed ustawieniem docelowego trybu falownika; integracja nie zastępuje wybranego trybu innym.
 - Mapowanie ponad 6 zakresów nie jest zapisywane do Deye.
 - Ustawienia zapisane w oknie **Ustawienia domyślne** są stanem powrotu po zatrzymaniu lub błędzie.
 - Stop Sell, zatrzymanie awaryjne oraz błędy SOC, ceny, mapowania i zapisu stosują 1:1 domyślny tryb, domyślną moc oraz trzy domyślne prądy użytkownika. Integracja nie zapisuje automatycznie wartości `0`, chyba że użytkownik sam zapisał ją jako domyślną.
 - Integracja zachowuje `Zero Export To CT`, `Zero Export To Load` albo `Selling First` dokładnie zgodnie z wyborem użytkownika i nie odgaduje topologii instalacji.
 - Stop Sell i zatrzymanie awaryjne zatrzaskują sterowanie managera do świadomego wznowienia oraz stosują pełny zestaw ustawień domyślnych użytkownika.
-- W **System i diagnostyka** przycisk **Włącz Manager i harmonogram** świadomie przywraca tryb `Schedule` i włącza Scheduler. Nie włącza osobnego harmonogramu ładowania z sieci. Diagnostyka pokazuje ostatnią próbę zastosowania slotu, wartości oczekiwane i odczytane oraz stan encji Deye Time Of Use.
-- W **System i diagnostyka** przycisk **Włącz Manager i harmonogram** świadomie przywraca tryb `Schedule` i włącza Scheduler. Nie włącza osobnego harmonogramu ładowania z sieci. Diagnostyka pokazuje ostatnią próbę zastosowania slotu, wartości oczekiwane i odczytane oraz stan encji Deye Time Of Use.
+- W **System i diagnostyka** przycisk **Włącz Manager i harmonogram** świadomie przywraca tryb `Schedule` i włącza Scheduler. Nie zmienia flagi `Grid` w slotach: wyłącznie aktywny slot z `Grid: tak` może włączyć Deye Grid Charge. Diagnostyka pokazuje ostatnią próbę zastosowania slotu, wartości oczekiwane i odczytane oraz stan encji Deye Time Of Use.
 - Ustawienia można ręcznie przywrócić przyciskiem **Zastosuj ustawienia domyślne teraz**.
 
 Integracja steruje fizycznym urządzeniem. Pierwszą konfigurację należy obserwować w Home Assistant i aplikacji falownika, używając konserwatywnych limitów mocy i prądu.

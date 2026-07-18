@@ -145,9 +145,10 @@ def manager_status_attrs(runtime):
     return {
         "slot_grid_charge": {
             key: {
-                "enabled": bool(slot.charge_enabled or slot.mode == "Charge"),
+                "enabled": bool(slot.charge_enabled),
                 "grid_charge_current": round(slot.grid_charge_current, 2),
-                "min_soc": round(slot.min_soc, 1),
+                "tou_soc": round(slot.tou_soc, 1),
+                "minimum_sell_soc": round(slot.minimum_sell_soc, 1),
             }
             for key, slot in runtime.slots.items()
         }

@@ -68,10 +68,10 @@ class DeyeSlotSwitch(DeyeEnergyManagerEntity, SwitchEntity, RestoreEntity):
             slot.charge_enabled = True
             slot.enabled = True
             self.runtime.scheduler_enabled = True
-            self.runtime.charge_scheduler_enabled = True
         else:
             slot.enabled = True
             self.runtime.scheduler_enabled = True
+        self.runtime._clear_slot_failure_latch()
         self.runtime.mark_config_saved()
         self.runtime.notify_update()
         await self.runtime.async_tick()
@@ -82,6 +82,7 @@ class DeyeSlotSwitch(DeyeEnergyManagerEntity, SwitchEntity, RestoreEntity):
             slot.charge_enabled = False
         else:
             slot.enabled = False
+        self.runtime._clear_slot_failure_latch()
         self.runtime.mark_config_saved()
         self.runtime.notify_update()
         await self.runtime.async_tick()
@@ -94,7 +95,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         DeyeManagerSwitch(runtime, "soc_guard_enabled", "SOC guard", "soc_guard_enabled"),
         DeyeManagerSwitch(runtime, "price_guard_enabled", "Price guard", "price_guard_enabled"),
         DeyeManagerSwitch(runtime, "emergency_stop", "Emergency stop", "emergency_stop"),
-        DeyeManagerSwitch(runtime, "charge_scheduler_enabled", "Charge scheduler", "charge_scheduler_enabled"),
     ]
     for key, label, *_ in SLOTS:
         entities.append(DeyeSlotSwitch(runtime, key, label))

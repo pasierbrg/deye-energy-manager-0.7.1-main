@@ -87,7 +87,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 DeyeSlotNumber(runtime, key, label, "discharge_current", "Discharge current", 240, 5, "A"),
                 DeyeSlotNumber(runtime, key, label, "charge_current", "Charge current", 240, 5, "A"),
                 DeyeSlotNumber(runtime, key, label, "grid_charge_current", "Grid charge current", 240, 5, "A"),
-                DeyeSlotNumber(runtime, key, label, "min_soc", "Minimum SOC", 100, 1, "%"),
+                DeyeSlotNumber(runtime, key, label, "minimum_sell_soc", "Minimum sell SOC", 100, 1, "%"),
+                DeyeSlotNumber(runtime, key, label, "tou_soc", "TOU SOC", 100, 1, "%"),
                 DeyeSlotNumber(runtime, key, label, "min_sell_price", "Minimum sell price", 5, 0.01, "PLN/kWh"),
             ]
         )

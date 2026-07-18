@@ -9,21 +9,24 @@
 - Usunięto przejściowe zerowanie parametrów i wymuszanie `Zero Export To Load`. Docelowy tryb jest ustawiany dopiero po zapisaniu i potwierdzeniu wartości liczbowych.
 - Błąd w połowie operacji przywraca logiczny harmonogram i pełne ustawienia domyślne. `Zero Export To CT`, `Zero Export To Load` i `Selling First` nie są wzajemnie zastępowane.
 - Dodano weryfikację odczytu trybu, mocy i wszystkich trzech prądów oraz diagnostykę krytycznego błędu częściowego zapisu.
-- Brak poprawnego odczytu przy aktywnej ochronie SOC uruchamia powrót 1:1 do pełnych ustawień domyślnych użytkownika.
-- Brakująca lub błędna cena przy aktywnej ochronie ceny uruchamia powrót 1:1 do pełnych ustawień domyślnych użytkownika.
+- Brak poprawnego SOC lub ceny blokuje tylko aktywny slot `Selling First`, gdy ma ustawiony odpowiednio minimalny SOC sprzedaży lub minimalną cenę. Sloty `Zero Export` nie wymagają tych danych.
 - Zapisy ustawień falownika są serializowane.
 - Wielopolowe aktualizacje są serializowane; wartości liczbowe są zapisywane i potwierdzane przed ustawieniem wybranego trybu docelowego.
 - Błąd mapowania ponad 6 zakresów zatrzymuje operację i stosuje 1:1 pełne ustawienia domyślne użytkownika.
 - Dodano zakresy walidacji dla mocy, prądów, SOC i cen.
 - Zatrzymanie awaryjne przełącza sterowanie w zatrzaśnięty tryb `Stop Sell`.
 - Dla zapisu aktywnego slotu dodano ponowienie i dłuższe potwierdzenie trybu pracy Deye. Przy niepowodzeniu status nie pokazuje już fałszywie aktywnej sprzedaży; diagnostyka zapisuje etap, wartości oczekiwane i odczytane.
-- Dodano walidację fizycznych encji Deye Time Of Use oraz świadomy przycisk/usługę `resume_manager` („Włącz Manager i harmonogram”). Włącza `Schedule` i Scheduler bez automatycznego włączania ładowania z sieci.
+- Dodano walidację fizycznych encji Deye Time Of Use oraz świadomy przycisk/usługę `resume_manager` („Włącz Manager i harmonogram”). Włącza `Schedule` i Scheduler, lecz nie zmienia flagi `Grid` w żadnym slocie.
+- Flaga `Grid` jest jedyną zgodą na Grid Charge: `Grid: nie` zawsze zapisuje wyłączony Grid Charge, także w trybie `Charge`; `charge_current` pozostaje limitem całkowitego ładowania baterii, a `grid_charge_current` limitem ładowania z sieci.
+- Rozdzielono minimalny SOC sprzedaży od fizycznego SOC zakresu TOU Deye. Kompresja sześciu zakresów używa wyłącznie SOC TOU i Grid Charge.
+- Usunięto aktywny przełącznik `charge_scheduler_enabled` z logiki sterowania. Parametry falownika wynikają z aktywnego slotu.
+- Po błędzie tego samego aktywnego slotu ustawienia domyślne są stosowane tylko raz; kolejna próba wymaga zmiany encji, harmonogramu, slotu albo świadomego wznowienia Managera.
 
 ### Harmonogram
 
 - Dodano usługę `apply_schedule_patch` do atomowych operacji zbiorczych.
 - Edycja zbiorcza i zastosowanie sugestii korzystają z jednej operacji backendowej.
-- Scheduler ładowania jest aktywowany przy wyborze trybu `Charge`.
+- Tryb `Charge` nie jest zgodą na Grid Charge; zgodę określa wyłącznie flaga `Grid` aktywnego slotu.
 - Nieudana aktualizacja przywraca logiczną konfigurację slotów.
 
 ### Dane i konfiguracja

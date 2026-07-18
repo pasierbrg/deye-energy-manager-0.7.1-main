@@ -75,7 +75,7 @@ restore_defaults:
   description: Ręcznie zastosuj ustawienia zapisane przez użytkownika w oknie Ustawienia domyślne.
 resume_manager:
   name: Włącz Manager i harmonogram
-  description: Świadomie włącza tryb Schedule i przełącznik Scheduler po Stop Sell lub zatrzymaniu awaryjnym. Nie włącza osobnego harmonogramu ładowania z sieci.
+  description: "Świadomie włącza tryb Schedule i Scheduler po Stop Sell lub zatrzymaniu awaryjnym. Nie zmienia flagi Grid w slotach; tylko Grid: tak zezwala na ładowanie z sieci."
 emergency_stop:
   name: Emergency stop
   description: Natychmiast zatrzaśnij sterowanie managera i zastosuj 1:1 pełny zestaw ustawień domyślnych użytkownika, włącznie z wybranym trybem.
@@ -117,7 +117,7 @@ set_slot_grid_charge:
           max: 240
           step: 5
           unit_of_measurement: A
-    min_soc:
+    tou_soc:
       required: false
       selector:
         number:

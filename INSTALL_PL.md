@@ -23,13 +23,13 @@ Automatyczne mapowanie niczego nie zapisuje bez końcowego potwierdzenia. Kreato
 Dodaj zasób JavaScript:
 
 ```text
-/deye_energy_manager/deye-energy-manager-card.js?v=0767
+/deye_energy_manager/deye-energy-manager-card.js?v=0768
 ```
 
 Przy instalacji ręcznej użyj:
 
 ```text
-/local/deye-energy-manager-card.js?v=0767
+/local/deye-energy-manager-card.js?v=0768
 ```
 
 Następnie dodaj kartę ręczną:
@@ -42,18 +42,18 @@ type: custom:deye-energy-manager-card
 
 1. Wykonaj kopię konfiguracji w panelu **System i diagnostyka**.
 2. Zaktualizuj integrację i uruchom ponownie Home Assistant.
-3. Zmień parametr cache zasobu na `v=0767`.
+3. Zmień parametr cache zasobu na `v=0768`.
 4. Odśwież przeglądarkę przez `Ctrl + F5`.
 5. Sprawdź mapowanie encji w opcjach integracji.
 6. Otwórz **Ustawienia i diagnostyka → Taryfa i dystrybucja**, wybierz operatora i taryfę, a następnie użyj przycisku **Zapisz ustawienia taryfy**.
 7. Zweryfikuj diagnostykę i wykonaj pierwszy test przy niskich limitach mocy.
-8. Po Stop Sell lub zatrzymaniu awaryjnym użyj **System i diagnostyka → Włącz Manager i harmonogram**. Przycisk włącza `Schedule` i Scheduler, ale nie włącza automatycznie harmonogramu ładowania z sieci.
+8. Po Stop Sell lub zatrzymaniu awaryjnym użyj **System i diagnostyka → Włącz Manager i harmonogram**. Przycisk włącza `Schedule` i Scheduler, lecz nie zmienia flagi `Grid` slotów; tylko `Grid: tak` zezwala na ładowanie z sieci.
 
 Po aktualizacji otwórz **Ustawienia → Urządzenia i usługi → Deye Energy Manager → Konfiguruj**. Kreator zachowa dotychczasowe mapowanie i pozwoli uzupełnić encje cen, Solcast oraz pogody. Ustawienia OSD i taryfy zostały przeniesione do karty i nie są już częścią mapowania encji.
 
 ## Wymagane i zalecane encje
 
-Wymagane dla bezpiecznego sterowania są: tryb pracy Deye, maksymalna moc sprzedaży, maksymalny prąd rozładowania oraz SOC baterii. Pozostałe encje sterujące i pomiarowe są zalecane zgodnie z używanymi funkcjami.
+Wymagane dla bezpiecznego sterowania są: tryb pracy Deye, maksymalna moc sprzedaży, maksymalny prąd rozładowania, prąd ładowania baterii oraz prąd ładowania z sieci. SOC baterii i cena sprzedaży są wymagane tylko przez aktywny slot `Selling First`, jeżeli ma odpowiedni limit. Sloty `Zero Export` nie wymagają tych danych. Pozostałe encje pomiarowe są zalecane zgodnie z używanymi funkcjami.
 
 Prognoza pogody jest opcjonalnym wsparciem Solcast. Jeżeli `weather.forecast_home_2` nie istnieje, wybierz inną encję z domeny `weather`, która udostępnia prognozę godzinową. Integracja pobiera prognozy godzinowe i dzienne przez `weather.get_forecasts`; brak osobnej prognozy dziennej jest podsumowywany z dostępnych danych godzinowych.
 
@@ -74,10 +74,10 @@ Prognoza pogody jest opcjonalnym wsparciem Solcast. Jeżeli `weather.forecast_ho
 
 Tryb ręczny pozwala wpisać własne stawki i przedziały tanich godzin. W trybie automatycznym pory roku, weekendy oraz polskie dni ustawowo wolne wynikają z wybranego profilu OSD. Katalog nie zastępuje umowy — przed uruchomieniem ładowania z sieci porównaj wybrane dane z dokumentami operatora.
 
-Po ręcznym skopiowaniu nowej karty do `/config/www/` użyj zasobu `/local/deye-energy-manager-card.js?v=0767`, przeładuj zasoby Lovelace i wykonaj `Ctrl + F5`. Jeśli korzystasz z karty dostarczanej przez integrację, użyj adresu `/deye_energy_manager/deye-energy-manager-card.js?v=0767`. Parametr `0767` wymusza pobranie szóstej rewizji karty wydania 0.7.6: widok 48 h jest podzielony na dwa ostre wykresy dobowe bez poziomego przewijania, z pogodą i stanami godzinowymi jako elementy HTML.
+Po ręcznym skopiowaniu nowej karty do `/config/www/` użyj zasobu `/local/deye-energy-manager-card.js?v=0768`, przeładuj zasoby Lovelace i wykonaj `Ctrl + F5`. Jeśli korzystasz z karty dostarczanej przez integrację, użyj adresu `/deye_energy_manager/deye-energy-manager-card.js?v=0768`. Parametr `0768` wymusza pobranie ósmej rewizji karty wydania 0.7.6: widok 48 h jest podzielony na dwa ostre wykresy dobowe bez poziomego przewijania, z pogodą i stanami godzinowymi jako elementy HTML.
 
-Plan na jutro wymaga ręcznego zaznaczenia godzin i potwierdzenia przyciskiem **Zaplanuj wybrane na jutro**. Plan jest zapisany z datą i pozostaje oczekujący po restarcie Home Assistant. W dniu wykonania integracja sprawdza SOC, wymagane ceny i encje, po czym stosuje dokładnie zaakceptowane pozycje. Nie tworzy planu zastępczego. W razie błędu plan jest oznaczony jako nieudany, a falownik otrzymuje pełne **Ustawienia domyślne** 1:1.
+Plan na jutro wymaga ręcznego zaznaczenia godzin i potwierdzenia przyciskiem **Zaplanuj wybrane na jutro**. Plan jest zapisany z datą i pozostaje oczekujący po restarcie Home Assistant. W dniu wykonania integracja sprawdza encje sterujące oraz tylko SOC i ceny wymagane przez zatwierdzony slot `Selling First`, po czym stosuje dokładnie zaakceptowane pozycje. Nie tworzy planu zastępczego. W razie błędu plan jest oznaczony jako nieudany, a falownik otrzymuje pełne **Ustawienia domyślne** 1:1.
 
-W 0.7.6 ochrona SOC działa fail-safe. Jeśli sensor SOC jest brakujący lub niedostępny, manager stosuje 1:1 pełny zestaw zapisany w **Ustawieniach domyślnych**, włącznie z wybranym przez użytkownika trybem.
+W 0.7.6 warunek SOC jest sprawdzany wyłącznie dla aktywnego slotu `Selling First`, gdy ma ustawiony minimalny SOC sprzedaży. Brak SOC nie blokuje slotu `Zero Export` ani nie jest zastępowany sztuczną wartością.
 
 Stop Sell, zatrzymanie awaryjne oraz błąd sterowania nie zerują automatycznie mocy ani prądów Deye. Integracja stosuje 1:1 pełny zestaw zapisany w **Ustawieniach domyślnych**, włącznie z trybem `Zero Export To CT`, `Zero Export To Load` albo `Selling First`. Integracja nie odgaduje topologii instalacji i nie zastępuje wybranego trybu innym. Przycisk **Zastosuj ustawienia domyślne teraz** pozwala wykonać świadome ręczne przywrócenie.

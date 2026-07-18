@@ -36,7 +36,7 @@ SLOT_GRID_CHARGE_SCHEMA = vol.Schema(
         vol.Required("slot_key"): cv.string,
         vol.Required("enabled"): cv.boolean,
         vol.Optional("grid_charge_current"): vol.All(vol.Coerce(float), vol.Range(min=0, max=240)),
-        vol.Optional("min_soc"): vol.All(vol.Coerce(float), vol.Range(min=0, max=100)),
+        vol.Optional("tou_soc"): vol.All(vol.Coerce(float), vol.Range(min=0, max=100)),
     }
 )
 SCHEDULE_PATCH_SCHEMA = vol.Schema(
@@ -147,8 +147,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         update = {"slot_key": slot_key, "charge_enabled": call.data["enabled"]}
         if "grid_charge_current" in call.data:
             update["grid_charge_current"] = call.data["grid_charge_current"]
-        if "min_soc" in call.data:
-            update["min_soc"] = call.data["min_soc"]
+        if "tou_soc" in call.data:
+            update["tou_soc"] = call.data["tou_soc"]
         await runtime.async_apply_schedule_patch([update])
 
     async def handle_apply_schedule_patch(call: ServiceCall) -> None:
