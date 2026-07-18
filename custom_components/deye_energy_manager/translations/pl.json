@@ -18,6 +18,9 @@
           "buy_price_today_sensor": "Sensor ceny zakupu dziś",
           "buy_price_tomorrow_sensor": "Sensor ceny zakupu jutro",
           "grid_power_sensor": "Sensor mocy sieci",
+          "pv_power_sensor": "Sensor mocy PV",
+          "load_power_sensor": "Sensor mocy domu",
+          "battery_power_sensor": "Sensor mocy baterii",
           "solcast_current_power_sensor": "Solcast: aktualna moc",
           "solcast_forecast_today_sensor": "Solcast: prognoza na dziś",
           "solcast_forecast_tomorrow_sensor": "Solcast: prognoza na jutro",
@@ -28,12 +31,21 @@
           "solcast_forecast_day_7_sensor": "Solcast: prognoza dzień 7",
           "solcast_remaining_today_sensor": "Solcast: pozostała prognoza na dziś",
           "solcast_peak_power_today_sensor": "Solcast: szczytowa moc dzisiaj",
-          "solcast_peak_time_today_sensor": "Solcast: czas szczytowej mocy dzisiaj"
+          "solcast_peak_time_today_sensor": "Solcast: czas szczytowej mocy dzisiaj",
+          "daily_pv_production_sensor": "Dzienna produkcja PV"
         }
       }
     },
     "abort": {
       "already_configured": "Deye Energy Manager jest już skonfigurowany."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Mapowanie encji",
+        "description": "Zmień encje używane przez Deye Energy Manager. Integracja zostanie automatycznie przeładowana."
+      }
     }
   }
 }

@@ -64,8 +64,6 @@ class DeyeSlotNumber(DeyeEnergyManagerEntity, NumberEntity, RestoreEntity):
         setattr(self.runtime.slots[self.slot_key], self.attr, value)
         self.runtime.mark_config_saved()
         self.runtime.notify_update()
-        if self.attr == "grid_charge_current":
-            await self.runtime.async_apply_slot_grid_charge(self.slot_key)
         await self.runtime.async_tick()
 
 

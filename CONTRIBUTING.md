@@ -1,33 +1,29 @@
-# Współpraca
+# Współtworzenie Deye Energy Manager
 
-Dzięki za chęć pomocy przy Deye Energy Manager.
+Dziękujemy za pomoc w rozwoju projektu.
 
-## Zgłaszanie problemów
+## Zgłoszenia błędów
 
-Przy zgłoszeniu błędu podaj:
+Do zgłoszenia dołącz:
 
-- wersję Home Assistant,
-- wersję Deye Energy Manager,
-- nazwę integracji, która udostępnia encje `deye_inverter_*`,
-- zrzut ekranu karty lub błąd z logów,
-- informację, która encja nie działa zgodnie z oczekiwaniem.
+- wersję Home Assistant i Deye Energy Manager;
+- model falownika;
+- stan sensora diagnostycznego integracji;
+- oczekiwane i rzeczywiste zachowanie;
+- logi bez danych poufnych;
+- informację, czy problem dotyczy sprzedaży, ładowania czy mapowania Time Of Use.
 
-## Propozycje zmian
+## Zmiany w kodzie
 
-Najlepiej opisać:
-
-- co ma się zmienić,
-- jaki problem rozwiązuje zmiana,
-- jakie encje Deye/Pstryk mają być użyte,
-- jak powinno to wyglądać na telefonie i komputerze.
-
-## Pull requesty
-
-Przed wysłaniem zmian sprawdź:
+1. Utwórz osobną gałąź.
+2. Nie dodawaj `__pycache__`, plików `.pyc` ani danych z własnej instalacji HA.
+3. Zachowaj fail-safe dla brakujących danych SOC i ceny.
+4. Nie omijaj transakcyjnej usługi harmonogramu dla operacji wielopolowych.
+5. Uruchom testy:
 
 ```text
-python -m compileall custom_components/deye_energy_manager
-node --check custom_components/deye_energy_manager/www/deye-energy-manager-card.js
+python -m unittest discover -s tests -v
+node --check www/deye-energy-manager-card.js
 ```
 
-Projekt jest skierowany głównie na polski rynek energii, więc dokumentacja i teksty użytkownika powinny być po polsku.
+6. Opisz wpływ zmiany na bezpieczeństwo sterowania falownikiem.

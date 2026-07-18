@@ -22,10 +22,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     runtime = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
         [
-            DeyeManagerButton(runtime, "apply_schedule", "Apply schedule", lambda r: r.async_apply_targets()),
+            DeyeManagerButton(runtime, "apply_schedule", "Apply schedule", lambda r: r.async_tick()),
             DeyeManagerButton(runtime, "manual_sell", "Manual sell", lambda r: r.async_manual_sell()),
             DeyeManagerButton(runtime, "charge_now", "Charge now", lambda r: r.async_charge_now()),
-            DeyeManagerButton(runtime, "stop_selling", "Stop selling", lambda r: r.async_stop_selling()),
+            DeyeManagerButton(runtime, "stop_selling", "Stop selling", lambda r: r.async_request_stop()),
             DeyeManagerButton(runtime, "restore_defaults", "Restore defaults", lambda r: r.async_restore_defaults()),
             DeyeManagerButton(runtime, "emergency_stop", "Emergency stop", lambda r: r.async_emergency_stop()),
         ]

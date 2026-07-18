@@ -113,6 +113,11 @@ dist
 # Docusaurus cache and generated files
 .docusaurus
 
+# Python bytecode and test caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
 # Serverless directories
 .serverless/
 

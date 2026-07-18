@@ -18,6 +18,9 @@
           "buy_price_today_sensor": "Buy price sensor today",
           "buy_price_tomorrow_sensor": "Buy price sensor tomorrow",
           "grid_power_sensor": "Grid power sensor",
+          "pv_power_sensor": "PV power sensor",
+          "load_power_sensor": "Load power sensor",
+          "battery_power_sensor": "Battery power sensor",
           "solcast_current_power_sensor": "Solcast current power",
           "solcast_forecast_today_sensor": "Solcast forecast today",
           "solcast_forecast_tomorrow_sensor": "Solcast forecast tomorrow",
@@ -28,12 +31,21 @@
           "solcast_forecast_day_7_sensor": "Solcast forecast day 7",
           "solcast_remaining_today_sensor": "Solcast remaining forecast today",
           "solcast_peak_power_today_sensor": "Solcast peak power today",
-          "solcast_peak_time_today_sensor": "Solcast peak power time today"
+          "solcast_peak_time_today_sensor": "Solcast peak power time today",
+          "daily_pv_production_sensor": "Daily PV production"
         }
       }
     },
     "abort": {
       "already_configured": "Deye Energy Manager is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Entity mapping",
+        "description": "Change the entities used by Deye Energy Manager. The integration reloads automatically."
+      }
     }
   }
 }

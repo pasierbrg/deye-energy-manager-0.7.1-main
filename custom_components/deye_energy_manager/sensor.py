@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import MATCH_ALL
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -10,7 +11,20 @@ from .entity import DeyeEnergyManagerEntity
 
 
 class DeyeManagerSensor(DeyeEnergyManagerEntity, SensorEntity):
-    def __init__(self, runtime, key, name, value_fn, unit=None, device_class=None, attrs_fn=None):
+    # Manager attributes are live dashboard payloads and should not be duplicated in Recorder.
+    _unrecorded_attributes = frozenset({MATCH_ALL})
+
+    def __init__(
+        self,
+        runtime,
+        key,
+        name,
+        value_fn,
+        unit=None,
+        device_class=None,
+        attrs_fn=None,
+        unrecorded_attributes=None,
+    ):
         super().__init__(runtime, key, name)
         self.value_fn = value_fn
         self.attrs_fn = attrs_fn
@@ -109,15 +123,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             DeyeManagerSensor(runtime, "next_active_slot", "Next active slot", lambda r: r.next_active_slot),
             DeyeManagerSensor(runtime, "last_applied_at", "Last settings applied", lambda r: r.last_applied_at or "never"),
             DeyeManagerSensor(runtime, "mapping_status", "Mapping status", lambda r: "ERROR" if r.mapping_error else "OK"),
-            DeyeManagerSensor(runtime, "diagnostics", "System diagnostics", lambda r: "connected" if r.data_available else "problem", attrs_fn=diagnostics_attrs),
+            DeyeManagerSensor(
+                runtime,
+                "diagnostics",
+                "System diagnostics",
+                lambda r: "connected" if r.data_available else "problem",
+                attrs_fn=diagnostics_attrs,
+                unrecorded_attributes={"entities"},
+            ),
             DeyeManagerSensor(runtime, "active_slot", "Active slot", lambda r: r.active_slot_key()),
             DeyeManagerSensor(runtime, "target_mode", "Target mode", lambda r: r.target_mode),
             DeyeManagerSensor(runtime, "target_sell_power", "Target sell power", lambda r: r.target_sell_power, "W", SensorDeviceClass.POWER),
             DeyeManagerSensor(runtime, "target_discharge_current", "Target discharge current", lambda r: r.target_discharge_current, "A", SensorDeviceClass.CURRENT),
             DeyeManagerSensor(runtime, "target_charge_current", "Target charge current", lambda r: r.target_charge_current, "A", SensorDeviceClass.CURRENT),
             DeyeManagerSensor(runtime, "battery_soc", "Battery SOC", lambda r: r.state_float(r.battery_soc_sensor, 0), "%", SensorDeviceClass.BATTERY),
+            DeyeManagerSensor(runtime, "pv_power", "PV power", lambda r: r.state_float(r.pv_power_sensor, 0), "W", SensorDeviceClass.POWER),
+            DeyeManagerSensor(runtime, "load_power", "Load power", lambda r: r.state_float(r.load_power_sensor, 0), "W", SensorDeviceClass.POWER),
+            DeyeManagerSensor(runtime, "battery_power", "Battery power", lambda r: r.state_float(r.battery_power_sensor, 0), "W", SensorDeviceClass.POWER),
+            DeyeManagerSensor(runtime, "grid_power", "Grid power", lambda r: r.state_float(r.grid_power_sensor, 0), "W", SensorDeviceClass.POWER),
             DeyeManagerSensor(runtime, "energy_price", "Energy price", lambda r: r.state_float(r.price_sensor, 0), "PLN/kWh"),
-            DeyeManagerSensor(runtime, "sold_energy_today", "Sold energy today", lambda r: round(r.sold_energy_today, 3), "kWh", SensorDeviceClass.ENERGY, attrs_fn=sales_stats_attrs),
+            DeyeManagerSensor(
+                runtime,
+                "sold_energy_today",
+                "Sold energy today",
+                lambda r: round(r.sold_energy_today, 3),
+                "kWh",
+                SensorDeviceClass.ENERGY,
+                attrs_fn=sales_stats_attrs,
+                unrecorded_attributes={"hourly_today", "week", "month"},
+            ),
             DeyeManagerSensor(runtime, "sold_value_today", "Sold value today", lambda r: round(r.sold_value_today, 2), "PLN"),
             DeyeManagerSensor(runtime, "sold_energy_current_hour", "Sold energy current hour", lambda r: round(r.sold_energy_current_hour, 3), "kWh", SensorDeviceClass.ENERGY),
             DeyeManagerSensor(runtime, "sold_value_current_hour", "Sold value current hour", lambda r: round(r.sold_value_current_hour, 2), "PLN"),
@@ -142,7 +176,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             DeyeManagerSensor(runtime, "current_charge_current", "Current charge current", lambda r: r.state_float(r.charge_current_number, 0), "A", SensorDeviceClass.CURRENT),
             DeyeManagerSensor(runtime, "current_grid_charge_current", "Current grid charge current", lambda r: r.state_float(r.grid_charge_current_number, 0), "A", SensorDeviceClass.CURRENT),
             DeyeManagerSensor(runtime, "last_action", "Last action", lambda r: r.last_action),
-            DeyeManagerSensor(runtime, "ai_state", "AI state", lambda r: "ready", attrs_fn=ai_state_attrs),
+            DeyeManagerSensor(
+                runtime,
+                "ai_state",
+                "AI state",
+                lambda r: "ready",
+                attrs_fn=ai_state_attrs,
+                unrecorded_attributes={
+                    "settings",
+                    "history",
+                    "learning_summary",
+                    "learning_recent",
+                    "learning_current_hour",
+                    "daily_summary",
+                    "monthly_summary",
+                    "solcast_history",
+                },
+            ),
             DeyeManagerSensor(runtime, "daily_pv_production", "Daily PV production", lambda r: r.state_float(r.daily_pv_production_sensor, 0), "kWh", SensorDeviceClass.ENERGY, attrs_fn=source_sensor_attrs(lambda r: r.daily_pv_production_sensor)),
             DeyeManagerSensor(runtime, "solcast_accuracy", "Solcast accuracy", lambda r: round(r.solcast_history[0].get("accuracy_percent", 0), 1) if r.solcast_history else 0, "%", attrs_fn=solcast_accuracy_attrs),
         ]

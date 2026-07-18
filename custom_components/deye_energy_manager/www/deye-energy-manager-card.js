@@ -20,6 +20,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
     this._settingsTab = "defaults";
     this._historyFilters = { from: "", to: "", type: "all" };
     this._lastAiAnalysisCheck = 0;
+    this._aiSettingsSaveTimer = null;
   }
 
   connectedCallback() {
@@ -245,10 +246,10 @@ class DeyeEnergyManagerCard extends HTMLElement {
 
     this.setText("[data-live='mode']", modeText);
     this.setClass("[data-live-card='mode']", "stat status-mode", modeClass, Boolean(modeClass));
-    this.setText("[data-live='pv']", `${this.state("sensor.deye_inverter_pv_power")} W`);
-    this.setText("[data-live='load']", `${this.state("sensor.deye_inverter_load_power")} W`);
-    this.setText("[data-live='grid']", this.gridFlow(this.state("sensor.deye_inverter_grid_power")));
-    this.setText("[data-live='battery-power']", this.batteryFlow(this.state("sensor.deye_inverter_battery_power")));
+    this.setText("[data-live='pv']", `${this.state(this.entity("sensor", "pv_power"))} W`);
+    this.setText("[data-live='load']", `${this.state(this.entity("sensor", "load_power"))} W`);
+    this.setText("[data-live='grid']", this.gridFlow(this.state(this.entity("sensor", "grid_power"))));
+    this.setText("[data-live='battery-power']", this.batteryFlow(this.state(this.entity("sensor", "battery_power"))));
     this.setText("[data-live='soc']", `${this.state(batterySoc)} %`);
     this.setText("[data-live='sold-today']", `${this.state(soldEnergyToday)} kWh / ${this.state(soldValueToday)} PLN`);
     this.setText("[data-live='active-slot']", activeSlotLabel);
@@ -952,6 +953,20 @@ class DeyeEnergyManagerCard extends HTMLElement {
     return this._hass.callService(domain, service, data);
   }
 
+  async applySchedulePatch(updates) {
+    if (!Array.isArray(updates) || !updates.length) return false;
+    if (!this.hasService("deye_energy_manager", "apply_schedule_patch")) return false;
+    this.beginSave();
+    try {
+      await this.callService("deye_energy_manager", "apply_schedule_patch", { data: JSON.stringify(updates) });
+      this.finishSave();
+      return true;
+    } catch (error) {
+      this.failSave("schedule_patch", error);
+      return false;
+    }
+  }
+
   hasService(domain, service) {
     return Boolean(this._hass?.services?.[domain]?.[service]);
   }
@@ -1096,14 +1111,14 @@ class DeyeEnergyManagerCard extends HTMLElement {
     const options = this.options(entityId, fallbackOptions);
     const merged = options.includes(current) || !current ? options : [current, ...options];
     return `<select data-select="${entityId}" ${this.exists(entityId) ? "" : "disabled"}>
-      ${merged.map((option) => `<option value="${option}" ${option === current ? "selected" : ""}>${option}</option>`).join("")}
+      ${merged.map((option) => `<option value="${this.escapeHtml(option)}" ${option === current ? "selected" : ""}>${this.escapeHtml(option)}</option>`).join("")}
     </select>`;
   }
 
   numberInput(entityId, unit = "") {
     return `<label class="field">
-      <input data-number="${entityId}" type="text" inputmode="decimal" value="${this.numberState(entityId)}" ${this.exists(entityId) ? "" : "disabled"}>
-      <span>${unit}</span>
+      <input data-number="${this.escapeHtml(entityId)}" type="text" inputmode="decimal" value="${this.escapeHtml(this.numberState(entityId))}" ${this.exists(entityId) ? "" : "disabled"}>
+      <span>${this.escapeHtml(unit)}</span>
     </label>`;
   }
 
@@ -1112,15 +1127,15 @@ class DeyeEnergyManagerCard extends HTMLElement {
       ${options.map((option) => {
         const optionValue = Array.isArray(option) ? option[0] : option;
         const optionLabel = Array.isArray(option) ? option[1] : option;
-        return `<option value="${optionValue}" ${optionValue === value ? "selected" : ""}>${optionLabel}</option>`;
+        return `<option value="${this.escapeHtml(optionValue)}" ${optionValue === value ? "selected" : ""}>${this.escapeHtml(optionLabel)}</option>`;
       }).join("")}
     </select>`;
   }
 
   rawNumber(name, value = 0, unit = "") {
     return `<label class="field">
-      <input data-raw="${name}" type="text" inputmode="decimal" value="${value}">
-      <span>${unit}</span>
+      <input data-raw="${this.escapeHtml(name)}" type="text" inputmode="decimal" value="${this.escapeHtml(value)}">
+      <span>${this.escapeHtml(unit)}</span>
     </label>`;
   }
 
@@ -1174,12 +1189,15 @@ class DeyeEnergyManagerCard extends HTMLElement {
 
   saveAiSettings(settings) {
     this._aiSettingsCache = { ...settings };
-    this.callService("deye_energy_manager", "save_ai_settings", { data: JSON.stringify(settings) });
     try {
       localStorage.setItem("deye_energy_manager_ai_settings_v073", JSON.stringify(settings));
     } catch (_err) {
       // LocalStorage can be blocked in some HA webviews. In that case the UI still works for this render.
     }
+    window.clearTimeout(this._aiSettingsSaveTimer);
+    this._aiSettingsSaveTimer = window.setTimeout(() => {
+      this.callService("deye_energy_manager", "save_ai_settings", { data: JSON.stringify(this._aiSettingsCache) });
+    }, 400);
   }
 
   aiHistory() {
@@ -1330,7 +1348,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
     this.editableConfigEntities().forEach((entityId) => { values[entityId] = this.state(entityId); });
     return {
       format: "deye-energy-manager-config",
-      version: "0.7.5",
+      version: "0.7.6",
       created_at: new Date().toISOString(),
       values,
       ai_settings: this.aiSettings(),
@@ -1340,8 +1358,17 @@ class DeyeEnergyManagerCard extends HTMLElement {
 
   async applyConfigurationSnapshot(snapshot) {
     if (!snapshot || snapshot.format !== "deye-energy-manager-config" || typeof snapshot.values !== "object") throw new Error("Nieprawidłowy plik konfiguracji");
+    const controlMode = this.entity("select", "control_mode");
+    const scheduler = this.entity("switch", "scheduler");
+    const chargeScheduler = this.entity("switch", "charge_scheduler");
+    const deferred = new Set([controlMode, scheduler, chargeScheduler].filter(Boolean));
+    if (this.exists(controlMode)) {
+      await this.callService("select", "select_option", { entity_id: controlMode, option: "Stop Sell" });
+    }
+    if (this.exists(scheduler)) await this.callService("switch", "turn_off", { entity_id: scheduler });
+    if (this.exists(chargeScheduler)) await this.callService("switch", "turn_off", { entity_id: chargeScheduler });
     for (const [entityId, value] of Object.entries(snapshot.values)) {
-      if (!this.exists(entityId)) continue;
+      if (!this.exists(entityId) || deferred.has(entityId)) continue;
       const domain = entityId.split(".")[0];
       if (["switch", "input_boolean"].includes(domain)) await this.callService(domain, value === "on" ? "turn_on" : "turn_off", { entity_id: entityId });
       else if (["select", "input_select"].includes(domain)) await this.callService(domain, "select_option", { entity_id: entityId, option: value });
@@ -1350,6 +1377,13 @@ class DeyeEnergyManagerCard extends HTMLElement {
       else if (domain === "input_datetime") await this.callService(domain, "set_datetime", { entity_id: entityId, time: String(value).slice(0, 8) });
     }
     if (snapshot.ai_settings && typeof snapshot.ai_settings === "object") this.saveAiSettings(snapshot.ai_settings);
+    for (const entityId of [chargeScheduler, scheduler]) {
+      if (!entityId || !this.exists(entityId) || !(entityId in snapshot.values)) continue;
+      await this.callService("switch", snapshot.values[entityId] === "on" ? "turn_on" : "turn_off", { entity_id: entityId });
+    }
+    if (controlMode && this.exists(controlMode) && controlMode in snapshot.values) {
+      await this.callService("select", "select_option", { entity_id: controlMode, option: snapshot.values[controlMode] });
+    }
   }
 
   exportConfiguration() {
@@ -1378,7 +1412,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
     const entity = this._hass?.states?.[this.entity("sensor", "diagnostics")];
     const attrs = entity?.attributes || {};
     const required = Array.isArray(attrs.entities) ? attrs.entities : [];
-    const entityRows = required.length ? required.map((item) => `<tr><td>${item.entity_id}</td><td><span class="diag-badge ${item.ok ? "ok" : "error"}">${item.ok ? "OK" : item.state}</span></td></tr>`).join("") : `<tr><td colspan="2">Brak danych diagnostycznych. Uruchom ponownie Home Assistant.</td></tr>`;
+    const entityRows = required.length ? required.map((item) => `<tr><td>${this.escapeHtml(item.entity_id)}</td><td><span class="diag-badge ${item.ok ? "ok" : "error"}">${item.ok ? "OK" : this.escapeHtml(item.state)}</span></td></tr>`).join("") : `<tr><td colspan="2">Brak danych diagnostycznych. Uruchom ponownie Home Assistant.</td></tr>`;
     const connected = attrs.connected === true;
     const mappingSegments = attrs.mapping_segments ?? this.scheduleSegments(slots).length;
     return `<div class="diagnostic-summary">
@@ -1388,8 +1422,8 @@ class DeyeEnergyManagerCard extends HTMLElement {
       <div><span>Harmonogram i mapowanie</span><strong class="${attrs.mapping_status === "ERROR" ? "bad" : "good"}">${attrs.mapping_status || "brak"} · ${mappingSegments}/6</strong></div>
       <div><span>Ostatni zapis</span><strong>${this.formatAppliedAt(attrs.last_saved_at)}</strong></div>
       <div><span>Ostatnie zastosowanie</span><strong>${this.formatAppliedAt(attrs.last_applied_at)}</strong></div>
-      <div><span>Ostatni błąd</span><strong class="${attrs.last_error && attrs.last_error !== "none" ? "bad" : "good"}">${attrs.last_error && attrs.last_error !== "none" ? attrs.last_error : "Brak"}</strong></div>
-      <div><span>Wersje</span><strong>Integracja ${attrs.integration_version || "0.7.5"} · karta 0.7.5</strong></div>
+      <div><span>Ostatni błąd</span><strong class="${attrs.last_error && attrs.last_error !== "none" ? "bad" : "good"}">${attrs.last_error && attrs.last_error !== "none" ? this.escapeHtml(attrs.last_error) : "Brak"}</strong></div>
+      <div><span>Wersje</span><strong>Integracja ${this.escapeHtml(attrs.integration_version || "0.7.6")} · karta 0.7.6</strong></div>
     </div>
     <section class="diagnostic-section"><h3>Wymagane encje</h3><div class="diagnostic-entities"><table class="settings-table"><thead><tr><th>Encja</th><th>Stan</th></tr></thead><tbody>${entityRows}</tbody></table></div></section>
     <section class="diagnostic-section"><h3>Sterowanie i odczyt</h3><div class="diagnostic-actions"><button data-system-defaults="1">Zatrzymaj managera i zastosuj domyślne</button><button data-refresh-entities="1">Ponownie odczytaj encje</button></div></section>
@@ -1401,7 +1435,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
   }
 
   aiNumber(name, label, value, unit = "") {
-    return `<div class="settings-row"><span>${label}</span><label class="field compact-field"><input data-ai-setting="${name}" type="text" inputmode="decimal" value="${value}"><span>${unit}</span></label></div>`;
+    return `<div class="settings-row"><span>${label}</span><label class="field compact-field"><input data-ai-setting="${this.escapeHtml(name)}" type="text" inputmode="decimal" value="${this.escapeHtml(value)}"><span>${this.escapeHtml(unit)}</span></label></div>`;
   }
 
   aiSelect(name, label, options, value) {
@@ -1409,7 +1443,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
       ${options.map((option) => {
         const optionValue = Array.isArray(option) ? option[0] : option;
         const optionLabel = Array.isArray(option) ? option[1] : option;
-        return `<option value="${optionValue}" ${optionValue === value ? "selected" : ""}>${optionLabel}</option>`;
+        return `<option value="${this.escapeHtml(optionValue)}" ${optionValue === value ? "selected" : ""}>${this.escapeHtml(optionLabel)}</option>`;
       }).join("")}
     </select></div>`;
   }
@@ -1429,27 +1463,20 @@ class DeyeEnergyManagerCard extends HTMLElement {
     const minSellPrice = this.rawValue("multi-min-sell-price", 0);
     const forceGridCharge = checked("mode") && mode === "Charge";
 
-    for (const [key, label] of selected) {
-      const entities = this.slotEntities(key, label);
-      if (checked("sellPower")) await this.setNumber(entities.sellPower, sellPower);
-      if (checked("dischargeCurrent")) await this.setNumber(entities.dischargeCurrent, dischargeCurrent);
-      if (checked("chargeCurrent")) await this.setNumber(entities.chargeCurrent, chargeCurrent);
-      if (checked("gridChargeCurrent")) await this.setNumber(entities.gridChargeCurrent, gridChargeCurrent);
-      if (checked("minSoc")) await this.setNumber(entities.minSoc, minSoc);
-      if (checked("minSellPrice")) await this.setNumber(entities.minSellPrice, minSellPrice);
-      if (checked("mode")) await this.setSelect(entities.mode, mode);
-      if (checked("active") || forceGridCharge) await this.turnSwitch(entities.sellEnabled, forceGridCharge || activeValue);
-      if (checked("gridCharge") || forceGridCharge) {
-        await this.setSlotGridCharge(
-          key,
-          entities,
-          forceGridCharge || gridChargeValue,
-          checked("gridChargeCurrent") ? gridChargeCurrent : null,
-          checked("minSoc") ? minSoc : null,
-          false,
-        );
-      }
-    }
+    const updates = selected.map(([key]) => {
+      const update = { slot_key: key };
+      if (checked("sellPower")) update.sell_power = sellPower;
+      if (checked("dischargeCurrent")) update.discharge_current = dischargeCurrent;
+      if (checked("chargeCurrent")) update.charge_current = chargeCurrent;
+      if (checked("gridChargeCurrent")) update.grid_charge_current = gridChargeCurrent;
+      if (checked("minSoc")) update.min_soc = minSoc;
+      if (checked("minSellPrice")) update.min_sell_price = minSellPrice;
+      if (checked("mode")) update.mode = mode;
+      if (checked("active") || forceGridCharge) update.enabled = forceGridCharge || activeValue;
+      if (checked("gridCharge") || forceGridCharge) update.charge_enabled = forceGridCharge || gridChargeValue;
+      return update;
+    });
+    if (!await this.applySchedulePatch(updates)) return;
     this._dialog = null;
     this.render();
   }
@@ -1912,6 +1939,14 @@ class DeyeEnergyManagerCard extends HTMLElement {
   aiProposal(slots) {
     const ai = this.aiSuggestions(slots);
     const settings = ai.settings;
+    if (!settings.enabled || !settings.allowDeyeMode) {
+      return {
+        rows: slots.map(([key, label]) => ({ key, label, enabled: false, mode: "Wyłączone", chargeEnabled: false })),
+        segmentCount: 1,
+        sellWindow: null,
+        buyWindow: null,
+      };
+    }
     const sellPrices = this.readPriceMap(this.entity("sensor", ["sell_price_today", "energy_price"]));
     const buyPrices = this.readPriceMap(this.entity("sensor", "buy_price_today"));
     const maxSellPower = Math.min(
@@ -1993,21 +2028,21 @@ class DeyeEnergyManagerCard extends HTMLElement {
     const rows = proposal.rows.filter((row) => selected.has(row.key));
     if (!rows.length) return;
     if (!window.confirm(`Zastosowa\u0107 propozycj\u0119 AI dla ${rows.length} wybranych godzin? Pozosta\u0142e godziny nie zostan\u0105 zmienione.`)) return;
-    for (const row of rows) {
-      const entities = this.slotEntities(row.key, row.label);
-      if (this.exists(entities.sellEnabled)) await this.callService("switch", row.enabled ? "turn_on" : "turn_off", { entity_id: entities.sellEnabled });
-      if (this.exists(entities.chargeEnabled)) await this.callService("switch", row.chargeEnabled ? "turn_on" : "turn_off", { entity_id: entities.chargeEnabled });
-      if (!row.enabled) continue;
-      if (this.exists(entities.mode)) await this.callService("select", "select_option", { entity_id: entities.mode, option: row.mode });
-      const numbers = [
-        [entities.sellPower, row.sellPower], [entities.dischargeCurrent, row.dischargeCurrent],
-        [entities.chargeCurrent, row.chargeCurrent], [entities.gridChargeCurrent, row.gridChargeCurrent],
-        [entities.minSoc, row.minSoc], [entities.minSellPrice, row.minSellPrice],
-      ];
-      for (const [entityId, value] of numbers) {
-        if (this.exists(entityId)) await this.callService("number", "set_value", { entity_id: entityId, value: Number(value) || 0 });
-      }
-    }
+    const updates = rows.map((row) => ({
+      slot_key: row.key,
+      enabled: row.enabled,
+      charge_enabled: row.chargeEnabled,
+      ...(row.enabled ? {
+        mode: row.mode,
+        sell_power: Number(row.sellPower) || 0,
+        discharge_current: Number(row.dischargeCurrent) || 0,
+        charge_current: Number(row.chargeCurrent) || 0,
+        grid_charge_current: Number(row.gridChargeCurrent) || 0,
+        min_soc: Number(row.minSoc) || 0,
+        min_sell_price: Number(row.minSellPrice) || 0,
+      } : {}),
+    }));
+    if (!await this.applySchedulePatch(updates)) return;
     await this.startSell();
     this.saveAiAnalysis(this.aiSuggestions(slots), "accepted", { segmentCount: proposal.segmentCount, accepted: true, selectedHours: rows.map((row) => row.label) });
     this._dialog = null;
@@ -2045,7 +2080,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
     return `<div class="analysis-details">
       <div class="analysis-detail-grid">
         <div><span>Status</span><strong>${applied}</strong></div>
-        <div><span>Strategia</span><strong>${strategy}</strong></div>
+        <div><span>Strategia</span><strong>${this.escapeHtml(strategy)}</strong></div>
         <div><span>Maks. moc sprzedaży</span><strong>${maxSellPower === null ? "Brak danych" : `${this.formatNumber(maxSellPower, 0)} W`}</strong></div>
         <div><span>Minimalny SOC</span><strong>${minSoc === null ? "Brak danych" : `${this.formatNumber(minSoc, 0)}%`}</strong></div>
         <div><span>Prognoza Solcast</span><strong>${this.formatNumber(item.solcastToday, 2)} kWh</strong></div>
@@ -2055,7 +2090,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
         <div><span>Przewidywane zużycie domu</span><strong>${this.formatNumber(item.expectedRemainingLoad, 2)} kWh</strong></div>
         <div><span>Szacowana nadwyżka</span><strong>${this.formatNumber(item.estimatedSurplus, 2)} kWh</strong></div>
         <div><span>Prognozowany SOC</span><strong>${predictedSoc === null ? "Brak danych" : `${this.formatNumber(predictedSoc, 0)}%`}</strong></div>
-        <div><span>Trend magazynu</span><strong>${item.predictedSocTrend || "Brak danych"}</strong></div>
+        <div><span>Trend magazynu</span><strong>${this.escapeHtml(item.predictedSocTrend || "Brak danych")}</strong></div>
       </div>
       <div class="analysis-price-groups">
         <section><h4>Najlepsze godziny sprzedaży</h4><ul>${sellRows}</ul></section>
@@ -2073,17 +2108,22 @@ class DeyeEnergyManagerCard extends HTMLElement {
     const analyses = this.filteredAnalyses();
     const daily = data.daily.filter((item) => inRange(String(item.date || "")));
     const monthly = data.monthly.filter((item) => inRange(`${item.month || ""}-01`));
-    const eventLabel = (event) => ({ suggestion: "Sugestia", accepted: "Zaakceptowana", daily_summary: "Podsumowanie dnia" }[event] || event || "Sugestia");
+    const eventLabel = (event) => this.escapeHtml(({ suggestion: "Sugestia", accepted: "Zaakceptowana", daily_summary: "Podsumowanie dnia" }[event] || event || "Sugestia"));
     const analysisRows = analyses.length ? analyses.map((item) => {
       const date = new Date(Number(item.timestamp) || item.date || 0);
       const dateLabel = Number.isNaN(date.getTime()) ? (item.date || "brak") : date.toLocaleString("pl-PL");
       const sell = item.bestSell?.[0] ? `${this.hourLabel(item.bestSell[0][0])} · ${this.formatPrice(item.bestSell[0][1])} PLN` : "brak";
       const outcome = item.event === "daily_summary" ? `Trafno&#347;&#263; ${this.formatNumber(item.accuracy_percent, 1)}%` : item.outcome ? `${this.formatNumber(item.outcome.sold_kwh, 2)} kWh / ${this.formatNumber(item.outcome.sold_value, 2)} PLN · PV ${this.formatNumber(item.outcome.pv_accuracy_percent, 0)}%` : item.rating ? `Ocena ${item.rating}/5` : item.event === "accepted" ? "Oczekuje na wynik dnia" : "Nie zastosowano";
       const rating = item.event === "accepted" || item.event === "suggestion" ? `<span class="history-rating">${[1,2,3,4,5].map((value) => `<button data-rate-history="${item.timestamp}" data-rating="${value}" class="${Number(item.rating) === value ? "active" : ""}">${value}</button>`).join("")}</span>` : "";
-      return `<tr><td>${dateLabel}</td><td>${eventLabel(item.event)}</td><td>${sell}</td><td>${outcome}<br>${rating}</td><td></td></tr>
+      return `<tr><td>${this.escapeHtml(dateLabel)}</td><td>${eventLabel(item.event)}</td><td>${sell}</td><td>${outcome}<br>${rating}</td><td></td></tr>
         <tr class="analysis-detail-row"><td colspan="5"><details class="analysis-record"><summary>Szczeg&#243;&#322;y</summary>${this.renderAnalysisDetails(item)}</details></td></tr>`;
     }).join("") : `<tr><td colspan="5">Brak rekord&#243;w dla wybranych filtr&#243;w</td></tr>`;
-    const dailyRows = daily.length ? daily.map((item) => `<tr><td>${item.date}</td><td>${this.formatNumber(item.forecast_kwh, 2)}</td><td>${this.formatNumber(item.actual_kwh ?? item.pv_kwh, 2)}</td><td>${this.formatNumber(item.accuracy_percent, 1)}%</td><td>${this.formatNumber(item.load_kwh, 2)}</td><td>${this.formatNumber(item.battery_charge_kwh, 2)} / ${this.formatNumber(item.battery_discharge_kwh, 2)}</td><td>${this.formatNumber(item.sold_kwh, 2)} / ${this.formatNumber(item.sold_value, 2)} PLN</td></tr>`).join("") : `<tr><td colspan="7">Brak podsumowa&#324; dziennych</td></tr>`;
+    const dailyRows = daily.length ? daily.map((item) => {
+      const accuracy = item.accuracy_percent === null || item.accuracy_percent === undefined
+        ? `W toku (${this.formatNumber(item.forecast_progress_percent, 1)}% realizacji)`
+        : `${this.formatNumber(item.accuracy_percent, 1)}%`;
+      return `<tr><td>${item.date}</td><td>${this.formatNumber(item.forecast_kwh, 2)}</td><td>${this.formatNumber(item.actual_kwh ?? item.pv_kwh, 2)}</td><td>${accuracy}</td><td>${this.formatNumber(item.load_kwh, 2)}</td><td>${this.formatNumber(item.battery_charge_kwh, 2)} / ${this.formatNumber(item.battery_discharge_kwh, 2)}</td><td>${this.formatNumber(item.sold_kwh, 2)} / ${this.formatNumber(item.sold_value, 2)} PLN</td></tr>`;
+    }).join("") : `<tr><td colspan="7">Brak podsumowa&#324; dziennych</td></tr>`;
     const monthlyRows = monthly.length ? monthly.map((item) => `<tr><td>${item.month}</td><td>${item.days}</td><td>${this.formatNumber(item.pv_kwh, 1)}</td><td>${this.formatNumber(item.load_kwh, 1)}</td><td>${this.formatNumber(item.grid_import_kwh, 1)} / ${this.formatNumber(item.grid_export_kwh, 1)}</td><td>${this.formatNumber(item.sold_kwh, 1)} / ${this.formatNumber(item.sold_value, 2)} PLN</td></tr>`).join("") : `<tr><td colspan="6">Brak podsumowa&#324; miesi&#281;cznych</td></tr>`;
     return `<div class="history-toolbar">
       <label>Od<input type="date" data-history-filter="from" value="${filters.from || ""}"></label>
@@ -2091,7 +2131,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
       <label>Typ<select data-history-filter="type"><option value="all">Wszystkie</option><option value="suggestion" ${filters.type === "suggestion" ? "selected" : ""}>Sugestie</option><option value="accepted" ${filters.type === "accepted" ? "selected" : ""}>Zaakceptowane</option><option value="daily_summary" ${filters.type === "daily_summary" ? "selected" : ""}>Podsumowania dnia</option></select></label>
       <button data-export-history="csv">Eksport CSV</button><button data-export-history="json">Eksport JSON</button><button data-export-monthly="1">Raport miesi&#281;czny</button>
     </div>
-    <section class="history-section"><h3>Prognoza i rzeczywista produkcja</h3><div class="history-scroll"><table class="settings-table"><thead><tr><th>Data</th><th>Prognoza kWh</th><th>Produkcja kWh</th><th>Trafno&#347;&#263;</th><th>Dom kWh</th><th>&#321;ad./roz&#322;. kWh</th><th>Sprzeda&#380;</th></tr></thead><tbody>${dailyRows}</tbody></table></div></section>
+    <section class="history-section"><h3>Prognoza i rzeczywista produkcja</h3><div class="history-scroll"><table class="settings-table"><thead><tr><th>Data</th><th>Prognoza kWh</th><th>Produkcja kWh</th><th>Trafno&#347;&#263; / stan</th><th>Dom kWh</th><th>&#321;ad./roz&#322;. kWh</th><th>Sprzeda&#380;</th></tr></thead><tbody>${dailyRows}</tbody></table></div></section>
     <section class="history-section"><h3>Wcze&#347;niejsze sugestie i skuteczno&#347;&#263;</h3><div class="history-scroll analysis-history-scroll"><table class="settings-table analysis-history-table"><thead><tr><th>Data</th><th>Typ</th><th>Najlepsza sprzeda&#380;</th><th>Wynik / ocena</th><th>Rekord</th></tr></thead><tbody>${analysisRows}</tbody></table></div></section>
     <section class="history-section"><h3>Podsumowania miesi&#281;czne</h3><div class="history-scroll"><table class="settings-table"><thead><tr><th>Miesi&#261;c</th><th>Dni</th><th>PV kWh</th><th>Dom kWh</th><th>Import / eksport</th><th>Sprzeda&#380;</th></tr></thead><tbody>${monthlyRows}</tbody></table></div></section>
     <button class="danger-action" data-clear-all-history="1">Wyczy&#347;&#263; histori&#281; i dane</button>`;
@@ -2141,9 +2181,9 @@ class DeyeEnergyManagerCard extends HTMLElement {
           <table class="settings-table"><thead><tr><th>Slot Deye</th><th>Od</th><th>Do</th><th>Funkcja</th><th>Grid</th><th>SOC</th></tr></thead><tbody>${segmentRows}</tbody></table>`;
       } else if (tab === "ai") {
         body = `
-          <div class="hint">AI w 0.7.5 analizuje dane i pokazuje sugestie. Nie zmienia harmonogramu automatycznie.</div>
+          <div class="hint">Inteligentny optymalizator 0.7.6 analizuje dane i pokazuje sugestie. Harmonogram zmienia dopiero po r&#281;cznym wyborze godzin i potwierdzeniu.</div>
           ${this.aiCheck("enabled", "W&#322;&#261;cz inteligentne planowanie", aiSettings.enabled)}
-          ${this.aiSelect("mode", "Tryb dzia&#322;ania", [["proposal", "Tylko sugestie"], ["manual", "Sugestie + r&#281;czne zatwierdzenie"], ["future_auto", "Automatyka w przysz&#322;o&#347;ci"]], aiSettings.mode)}
+          ${this.row("Tryb dzia&#322;ania", "Sugestie z r&#281;cznym zatwierdzeniem")}
           ${this.aiSelect("strategy", "Priorytet", [["balanced", "Zr&#243;wnowa&#380;ony"], ["profit", "Maksymalny zysk"], ["autoconsumption", "Maksymalna autokonsumpcja"]], aiSettings.strategy)}
           ${this.aiCheck("forecastEnabled", "Uwzgl&#281;dniaj prognoz&#281; Solcast", aiSettings.forecastEnabled)}
           ${this.aiNumber("forecastMargin", "Margines bezpiecze&#324;stwa prognozy", aiSettings.forecastMargin, "%")}
@@ -2448,7 +2488,8 @@ class DeyeEnergyManagerCard extends HTMLElement {
           .sales-panel>div{padding:0 2px 2px}.sales-summary{gap:10px;padding:12px}.sales-summary .stat{border-left:3px solid rgba(21,155,255,.72)}.sales-summary .stat:nth-child(1){border-left-color:var(--green)}.sales-summary .stat:nth-child(2){border-left-color:#ffd166}.sales-summary .stat:nth-child(3){border-left-color:var(--blue)}.sales-summary .stat:nth-child(4){border-left-color:var(--purple)}.sales-summary .stat:nth-child(5){border-left-color:var(--gold)}
           .sales-chart{height:118px;margin:0 12px 12px;padding:10px 8px 7px;border:1px solid rgba(107,157,182,.25);border-radius:8px;background:rgba(4,15,24,.7)}.sales-bar{height:98px}.sales-bar span{background:linear-gradient(180deg,#74ea4b,#28b963);box-shadow:0 0 10px rgba(53,214,111,.12)}.sales-bar.now span{background:linear-gradient(180deg,#ffe08a,#f5b942)}
           .sales-tables{gap:12px;padding:0 12px 12px}.sales-tables>div{overflow:hidden;border:1px solid rgba(107,157,182,.25);border-radius:8px;background:rgba(4,15,24,.62)}.section-label{padding:9px 11px;background:rgba(18,42,59,.86);color:#d8edf8;font-size:11px;letter-spacing:0;text-transform:uppercase}.mini-table td{padding:6px 9px;border-top:1px solid rgba(118,166,190,.16);font-size:11px}.mini-table tr:hover td{background:rgba(21,155,255,.05)}
-          @media(max-width:1500px){.info-grid{grid-template-columns:1fr 1fr}.info-grid>.panel:nth-child(3){grid-column:1/-1}.schedule-main.selecting{grid-template-columns:1fr}.bulk-panel{max-width:none}.mode-legend{grid-template-columns:repeat(3,minmax(0,1fr))}}
+           .dialog-head{position:sticky;top:0;z-index:5;background:linear-gradient(180deg,rgba(14,50,70,.98),rgba(10,30,44,.98))}.dialog-actions{position:sticky;bottom:0;z-index:4;padding:12px 14px;background:rgba(6,20,32,.98);border-top:1px solid var(--line)}.ai-dialog{width:min(900px,96vw);height:min(900px,92vh);max-height:92vh;overflow:hidden;display:grid;grid-template-rows:auto minmax(0,1fr)}.ai-dialog>.dialog-body{overflow:auto;overscroll-behavior:contain}.ai-proposal-scroll,.ai-history-scroll{max-height:360px}
+           @media(max-width:1500px){.info-grid{grid-template-columns:1fr 1fr}.info-grid>.panel:nth-child(3){grid-column:1/-1}.schedule-main.selecting{grid-template-columns:1fr}.bulk-panel{max-width:none}.mode-legend{grid-template-columns:repeat(3,minmax(0,1fr))}}
            @media(max-width:980px){.dem-v073{padding:10px}.info-grid{grid-template-columns:1fr}.status-grid,.sales-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.info-grid>.panel{height:auto;min-height:340px}.schedule-head{display:grid}.schedule-tools{justify-content:stretch}.tool-btn{flex:1}.mode-legend{grid-template-columns:1fr 1fr}.schedule-table{min-width:1160px}.schedule-table-card{overflow-x:auto}.sales-tables{grid-template-columns:1fr}.sales-chart{overflow-x:auto;grid-template-columns:repeat(24,24px)}.price-scroll{height:260px;overflow:auto;scrollbar-gutter:stable}.solcast-days{grid-template-columns:repeat(2,1fr)}.settings-layout{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}.settings-nav{flex-direction:row;overflow-x:auto;overflow-y:hidden;border-right:0;border-bottom:1px solid var(--line)}.settings-nav button{width:auto;min-width:max-content;text-align:center}.diagnostic-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
            @media(max-width:620px){
              .dem-v073{padding:4px;gap:8px}.panel,.schedule-shell,.table-wrap{border-radius:7px}.panel-title{padding:10px 12px;font-size:18px}
@@ -2457,7 +2498,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
              .solcast-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.solcast-days{display:flex;gap:6px;overflow-x:auto;scroll-snap-type:x proximity;padding-bottom:5px}.solcast-day{min-width:132px;scroll-snap-align:start}.solcast-chart{height:162px;padding-left:5px;padding-right:5px}.solcast-bars{height:138px;min-width:560px}.solcast-performance{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;padding:7px}
              .schedule-shell{padding:7px}.schedule-head{gap:8px}.schedule-title h2{font-size:19px}.schedule-title p{font-size:11px;line-height:1.35}.schedule-tools{display:grid;grid-template-columns:1fr 1fr;gap:6px}.tool-btn{min-height:36px;padding:0 8px;justify-content:center;font-size:12px}.gear-btn{width:100%;min-height:36px}.mode-legend{display:flex;gap:10px;overflow-x:auto;padding:3px 1px 7px;scroll-snap-type:x proximity}.mode-tile{min-width:150px;scroll-snap-align:start}.mode-icon{width:30px;height:30px}.mode-tile strong{font-size:12px}.mode-tile span{font-size:10px}.schedule-table{min-width:880px}.schedule-table th,.schedule-table td{padding:2px 3px}.schedule-table td{font-size:10px}.schedule-foot{padding:7px;align-items:flex-start;flex-direction:column}.foot-actions{width:100%;display:grid;grid-template-columns:1fr 1fr}.foot-actions button{justify-content:center;padding:0 7px;font-size:11px}
              .sales-summary{padding:8px}.sales-chart{min-height:150px}.sales-tables{gap:8px}.sales-table-card h3{font-size:14px;padding:9px}.sales-table-card th,.sales-table-card td{font-size:11px;padding:6px 8px}
-             .apply-row{grid-template-columns:24px 1fr}.apply-row .field,.apply-row select{grid-column:2}.ai-grid{grid-template-columns:1fr}.history-toolbar{grid-template-columns:1fr 1fr}.history-toolbar button{width:100%}.analysis-detail-grid,.analysis-price-groups{grid-template-columns:1fr}.settings-dialog{width:100%!important;height:94vh;max-height:94vh!important}.settings-content{padding:9px}.diagnostic-summary{grid-template-columns:1fr}.diagnostic-actions{display:grid}.diagnostic-actions button{width:100%}
+              .overlay{padding:0;align-items:stretch}.dialog,.ai-dialog,.settings-dialog{width:100%!important;height:100dvh!important;max-height:100dvh!important;border-radius:0}.dialog-head{padding-top:max(14px,env(safe-area-inset-top))}.dialog-actions{padding-bottom:max(12px,env(safe-area-inset-bottom))}.apply-row{grid-template-columns:24px 1fr}.apply-row .field,.apply-row select{grid-column:2}.ai-grid{grid-template-columns:1fr}.ai-proposal-scroll,.ai-history-scroll{max-height:none}.history-toolbar{grid-template-columns:1fr 1fr}.history-toolbar button{width:100%}.analysis-detail-grid,.analysis-price-groups{grid-template-columns:1fr}.settings-content{padding:9px}.diagnostic-summary{grid-template-columns:1fr}.diagnostic-actions{display:grid}.diagnostic-actions button{width:100%}
            }
         </style>
         <div class="dem-v073">
@@ -2465,10 +2506,10 @@ class DeyeEnergyManagerCard extends HTMLElement {
             <h2 class="panel-title">${this.iconSvg("chart")} Status energii</h2>
             <div class="status-grid">
               ${this.stat("Tryb", modeText, `${modeClass} status-mode`, "mode", "shield")}
-              ${this.stat("PV", `${this.state("sensor.deye_inverter_pv_power")} W`, "status-pv", "pv", "pv")}
-              ${this.stat("Dom", `${this.state("sensor.deye_inverter_load_power")} W`, "status-home", "load", "home")}
-              ${this.stat("Sie&#263;", this.gridFlow(this.state("sensor.deye_inverter_grid_power")), "status-grid", "grid", "grid")}
-              ${this.stat("Bateria", this.batteryFlow(this.state("sensor.deye_inverter_battery_power")), "status-battery", "battery-power", "battery")}
+              ${this.stat("PV", `${this.state(this.entity("sensor", "pv_power"))} W`, "status-pv", "pv", "pv")}
+              ${this.stat("Dom", `${this.state(this.entity("sensor", "load_power"))} W`, "status-home", "load", "home")}
+              ${this.stat("Sie&#263;", this.gridFlow(this.state(this.entity("sensor", "grid_power"))), "status-grid", "grid", "grid")}
+              ${this.stat("Bateria", this.batteryFlow(this.state(this.entity("sensor", "battery_power"))), "status-battery", "battery-power", "battery")}
               ${this.stat("SOC", `${this.state(batterySoc)} %`, "status-soc", "soc", "battery")}
               ${this.stat("Sprzedane dzisiaj", `${this.state(soldEnergyToday)} kWh / ${this.state(soldValueToday)} PLN`, "status-sold", "sold-today", "money")}
               ${this.stat("Aktywny slot", activeSlotLabel, "status-slot", "active-slot", "clock")}
@@ -2802,4 +2843,4 @@ class DeyeEnergyManagerCard extends HTMLElement {
 
 customElements.define("deye-energy-manager-card", DeyeEnergyManagerCard);
 window.customCards = window.customCards || [];
-window.customCards.push({ type: "deye-energy-manager-card", name: "Deye Energy Manager", description: "Deye Energy Manager 0.7.5" });
+window.customCards.push({ type: "deye-energy-manager-card", name: "Deye Energy Manager", description: "Deye Energy Manager 0.7.6" });

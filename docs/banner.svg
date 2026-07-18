@@ -37,7 +37,7 @@
     <rect class="badge" x="146" y="0" width="108" height="36" rx="18"/>
     <text class="badgeText" x="200" y="24" text-anchor="middle">MIT</text>
     <rect class="badge" x="270" y="0" width="134" height="36" rx="18"/>
-    <text class="badgeText" x="337" y="24" text-anchor="middle">v0.7.5</text>
+    <text class="badgeText" x="337" y="24" text-anchor="middle">v0.7.6</text>
     <rect class="badge" x="420" y="0" width="176" height="36" rx="18"/>
     <text class="badgeText" x="508" y="24" text-anchor="middle">buycoffee.to</text>
   </g>

@@ -1,0 +1,40 @@
+name: Validate
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Python syntax
+        run: python -m compileall -q custom_components tests
+      - name: Safety regression tests
+        run: python -m unittest discover -s tests -v
+      - name: Card syntax
+        run: |
+          node --check www/deye-energy-manager-card.js
+          node --check custom_components/deye_energy_manager/www/deye-energy-manager-card.js
+      - name: Verify bundled card copy
+        run: cmp www/deye-energy-manager-card.js custom_components/deye_energy_manager/www/deye-energy-manager-card.js
+      - name: Validate JSON
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          for path in Path('.').rglob('*.json'):
+              json.loads(path.read_text(encoding='utf-8-sig'))
+              print(f'JSON OK: {path}')
+          PY

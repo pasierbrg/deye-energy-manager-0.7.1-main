@@ -1,77 +1,42 @@
-﻿# Deye Energy Manager - instalacja
+# Deye Energy Manager 0.7.6 — instalacja
 
-Aktualna wersja: `0.7.5`
+Wymagany Home Assistant: `2026.6` lub nowszy.
 
-To jest kompletne repozytorium do GitHuba i HACS. Nie dodawaj `deye_energy_manager:` do `configuration.yaml`.
+## Instalacja przez HACS
 
-## 1. Instalacja przez HACS
+1. Dodaj repozytorium jako niestandardowe repozytorium HACS typu **Integracja**.
+2. Zainstaluj Deye Energy Manager.
+3. Uruchom ponownie Home Assistant.
+4. Przejdź do **Ustawienia → Urządzenia i usługi → Dodaj integrację**.
+5. Wybierz encje sterujące Deye oraz opcjonalne sensory Pstryk i Solcast.
 
-1. OtwĂłrz Home Assistant.
-2. WejdĹş w HACS.
-3. Kliknij trzy kropki i wybierz `Custom repositories`.
-4. Wklej adres swojego repozytorium GitHub.
-5. Jako typ wybierz `Integration`.
-6. Dodaj repozytorium.
-7. Zainstaluj `Deye Energy Manager`.
-8. Zrestartuj Home Assistant.
+## Karta dashboardu
 
-## 2. Dodanie integracji
-
-1. WejdĹş w `Ustawienia -> UrzÄ…dzenia i usĹ‚ugi`.
-2. Kliknij `Dodaj integracjÄ™`.
-3. Wyszukaj `Deye Energy Manager`.
-4. Dodaj integracjÄ™ i wybierz encje falownika Deye, Pstryk AIO oraz Solcast.
-
-## 3. Dodanie karty Lovelace
-
-Po restarcie Home Assistant skopiuj plik:
+Dodaj zasób JavaScript:
 
 ```text
-www/deye-energy-manager-card.js
+/deye_energy_manager/deye-energy-manager-card.js?v=076
 ```
 
-do katalogu:
+Przy instalacji ręcznej użyj:
 
 ```text
-/config/www/deye-energy-manager-card.js
+/local/deye-energy-manager-card.js?v=076
 ```
 
-NastÄ™pnie dodaj zasĂłb Lovelace:
-
-```text
-/local/deye-energy-manager-card.js?v=0761
-```
-
-Typ zasobu:
-
-```text
-ModuĹ‚ JavaScript
-```
-
-Potem odĹ›wieĹĽ Home Assistant przez `Ctrl + F5` i dodaj kartÄ™ rÄ™cznÄ…:
+Następnie dodaj kartę ręczną:
 
 ```yaml
 type: custom:deye-energy-manager-card
 ```
 
-## 4. Co dodano w 0.7.5
+## Aktualizacja z 0.7.5
 
-- Uproszczony status energii.
-- Czytelne szczegĂłĹ‚y historii analiz i sugestii.
-- DziaĹ‚ajÄ…cy `Grid Charge` w godzinowych slotach oraz automatyczna obsĹ‚uga trybu `Charge`.
-- Bezpieczne mapowanie harmonogramu 24h na szeĹ›Ä‡ slotĂłw Deye Time Of Use.
-- Natychmiastowa aktualizacja widoku po zapisie z obsĹ‚ugÄ… bĹ‚Ä™dĂłw.
-- Uproszczone panele cen sprzedaĹĽy i zakupu.
+1. Wykonaj kopię konfiguracji w panelu **System i diagnostyka**.
+2. Zaktualizuj integrację i uruchom ponownie Home Assistant.
+3. Zmień parametr cache zasobu na `v=076`.
+4. Odśwież przeglądarkę przez `Ctrl + F5`.
+5. Sprawdź mapowanie encji w opcjach integracji.
+6. Zweryfikuj diagnostykę i wykonaj pierwszy test przy niskich limitach mocy.
 
-## 5. Gdy widzisz starÄ… kartÄ™
-
-ZmieĹ„ numer w zasobie Lovelace:
-
-```text
-/local/deye-energy-manager-card.js?v=0761
-```
-
-Potem odĹ›wieĹĽ przeglÄ…darkÄ™ przez `Ctrl + F5`.
-
-
-
+W 0.7.6 ochrona SOC działa fail-safe. Jeśli sensor SOC jest brakujący lub niedostępny, manager nie uruchomi sprzedaży.

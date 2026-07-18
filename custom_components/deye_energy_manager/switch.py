@@ -26,6 +26,9 @@ class DeyeManagerSwitch(DeyeEnergyManagerEntity, SwitchEntity, RestoreEntity):
             setattr(self.runtime, self.attr, last_state.state == "on")
 
     async def async_turn_on(self, **kwargs: Any):
+        if self.attr == "emergency_stop":
+            await self.runtime.async_emergency_stop()
+            return
         setattr(self.runtime, self.attr, True)
         self.runtime.mark_config_saved()
         self.runtime.notify_update()
@@ -65,15 +68,12 @@ class DeyeSlotSwitch(DeyeEnergyManagerEntity, SwitchEntity, RestoreEntity):
             slot.charge_enabled = True
             slot.enabled = True
             self.runtime.scheduler_enabled = True
+            self.runtime.charge_scheduler_enabled = True
         else:
             slot.enabled = True
             self.runtime.scheduler_enabled = True
         self.runtime.mark_config_saved()
         self.runtime.notify_update()
-        if self.charge and not await self.runtime.async_apply_slot_grid_charge(self.slot_key):
-            slot.charge_enabled = False
-            self.runtime.notify_update()
-            raise ValueError(self.runtime.last_error or "Nie udało się włączyć ładowania z sieci")
         await self.runtime.async_tick()
 
     async def async_turn_off(self, **kwargs: Any):
@@ -84,10 +84,6 @@ class DeyeSlotSwitch(DeyeEnergyManagerEntity, SwitchEntity, RestoreEntity):
             slot.enabled = False
         self.runtime.mark_config_saved()
         self.runtime.notify_update()
-        if self.charge and not await self.runtime.async_apply_slot_grid_charge(self.slot_key):
-            slot.charge_enabled = True
-            self.runtime.notify_update()
-            raise ValueError(self.runtime.last_error or "Nie udało się wyłączyć ładowania z sieci")
         await self.runtime.async_tick()
 
 

@@ -122,3 +122,12 @@ set_slot_grid_charge:
           max: 100
           step: 1
           unit_of_measurement: "%"
+apply_schedule_patch:
+  name: Apply schedule patch
+  description: Atomically validate and apply multiple 24-hour schedule slot changes. Intended for the bundled dashboard card.
+  fields:
+    data:
+      required: true
+      selector:
+        text:
+          multiline: true
