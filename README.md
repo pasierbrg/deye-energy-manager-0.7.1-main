@@ -13,7 +13,7 @@ Deye Energy Manager jest niestandardową integracją Home Assistant dla falownik
 
 Wersja 0.7.6 koncentruje się na bezpieczeństwie, jakości danych i wygodniejszej konfiguracji:
 
-- brak poprawnego odczytu SOC lub ceny blokuje wyłącznie aktywny slot `Selling First`, gdy dany warunek jest dla niego ustawiony; sloty `Zero Export` działają bez tych danych;
+- brakujący albo nieprawidłowy odczyt SOC lub ceny jest błędem wyłącznie aktywnego slotu `Selling First`, gdy dany warunek jest dla niego ustawiony; prawidłowy odczyt poniżej progu jedynie wstrzymuje sprzedaż bez błędu harmonogramu, a sloty `Zero Export` działają bez tych danych;
 - zapisy wielopolowe są serializowane; wartości liczbowe są zapisywane i potwierdzane przed ustawieniem wybranego trybu docelowego;
 - harmonogram przekraczający 6 fizycznych zakresów Deye jest odrzucany przed aktywnym sterowaniem;
 - karta stosuje operacje zbiorcze i sugestie przez jedną transakcyjną usługę backendu;
@@ -163,12 +163,12 @@ Przykład kompletnego dashboardu znajduje się w `dashboard/energy_manager.yaml`
 
 ## Zasady bezpieczeństwa
 
-- Brak poprawnego odczytu SOC albo ceny blokuje `Selling First` tylko wtedy, gdy aktywny slot wymaga minimalnego SOC albo minimalnej ceny sprzedaży. Nie blokuje slotów `Zero Export`.
+- Brakujący albo nieprawidłowy odczyt SOC lub ceny jest błędem tylko wtedy, gdy aktywny slot `Selling First` wymaga minimalnego SOC albo minimalnej ceny sprzedaży. Prawidłowy odczyt poniżej progu jedynie wstrzymuje sprzedaż komunikatem warunkowym — bez `SCHEDULE APPLY ERROR`, bez ponawiania zapisu i bez blokowania slotów `Zero Export`.
 - Aktualizacja ustawień zapisuje i potwierdza wartości liczbowe przed ustawieniem docelowego trybu falownika; integracja nie zastępuje wybranego trybu innym.
-- Falownik może publikować nowy stan z opóźnieniem: po pojedynczym zapisie integracja oczekuje na potwierdzenie maksymalnie 90 sekund, bez ponawiania tej samej transakcji i bez przedwczesnego powrotu do ustawień domyślnych.
+- Falownik może publikować nowy stan z opóźnieniem: po pojedynczym zapisie integracja nasłuchuje zmian encji Deye i wykonuje odczyt kontrolny co kilka sekund, maksymalnie przez 90 sekund. Nie ponawia tej samej transakcji ani nie wraca przedwcześnie do ustawień domyślnych.
 - Mapowanie ponad 6 zakresów nie jest zapisywane do Deye.
 - Ustawienia zapisane w oknie **Ustawienia domyślne** są stanem powrotu po zatrzymaniu lub błędzie.
-- Stop Sell, zatrzymanie awaryjne oraz błędy SOC, ceny, mapowania i zapisu stosują 1:1 domyślny tryb, domyślną moc oraz trzy domyślne prądy użytkownika. Integracja nie zapisuje automatycznie wartości `0`, chyba że użytkownik sam zapisał ją jako domyślną.
+- Stop Sell, zatrzymanie awaryjne, brakujący lub nieprawidłowy odczyt wymagany przez aktywny slot, błąd mapowania i błąd zapisu stosują 1:1 domyślny tryb, domyślną moc oraz trzy domyślne prądy użytkownika. Prawidłowy SOC lub cena poniżej progu sprzedaży są normalnym warunkiem wstrzymania sprzedaży, nie błędem. Integracja nie zapisuje automatycznie wartości `0`, chyba że użytkownik sam zapisał ją jako domyślną.
 - Integracja zachowuje `Zero Export To CT`, `Zero Export To Load` albo `Selling First` dokładnie zgodnie z wyborem użytkownika i nie odgaduje topologii instalacji.
 - Stop Sell i zatrzymanie awaryjne zatrzaskują sterowanie managera do świadomego wznowienia oraz stosują pełny zestaw ustawień domyślnych użytkownika.
 - W **System i diagnostyka** przycisk **Włącz Manager i harmonogram** świadomie przywraca tryb `Schedule` i włącza Scheduler. Nie zmienia flagi `Grid` w slotach: wyłącznie aktywny slot z `Grid: tak` może włączyć Deye Grid Charge. Diagnostyka pokazuje ostatnią próbę zastosowania slotu, wartości oczekiwane i odczytane oraz stan encji Deye Time Of Use.

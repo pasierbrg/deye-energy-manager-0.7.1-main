@@ -9,13 +9,13 @@
 - Usunięto przejściowe zerowanie parametrów i wymuszanie `Zero Export To Load`. Docelowy tryb jest ustawiany dopiero po zapisaniu i potwierdzeniu wartości liczbowych.
 - Błąd w połowie operacji przywraca logiczny harmonogram i pełne ustawienia domyślne. `Zero Export To CT`, `Zero Export To Load` i `Selling First` nie są wzajemnie zastępowane.
 - Dodano weryfikację odczytu trybu, mocy i wszystkich trzech prądów oraz diagnostykę krytycznego błędu częściowego zapisu.
-- Brak poprawnego SOC lub ceny blokuje tylko aktywny slot `Selling First`, gdy ma ustawiony odpowiednio minimalny SOC sprzedaży lub minimalną cenę. Sloty `Zero Export` nie wymagają tych danych.
+- Brakujący lub nieprawidłowy SOC albo cena są błędem tylko aktywnego slotu `Selling First`, gdy ma ustawiony odpowiedni warunek. Prawidłowy odczyt poniżej progu jest zwykłym wstrzymaniem sprzedaży, bez `SCHEDULE APPLY ERROR`, bez ponawiania zapisu i bez blokowania slotów `Zero Export`.
 - Zapisy ustawień falownika są serializowane.
 - Wielopolowe aktualizacje są serializowane; wartości liczbowe są zapisywane i potwierdzane przed ustawieniem wybranego trybu docelowego.
 - Błąd mapowania ponad 6 zakresów zatrzymuje operację i stosuje 1:1 pełne ustawienia domyślne użytkownika.
 - Dodano zakresy walidacji dla mocy, prądów, SOC i cen.
 - Zatrzymanie awaryjne przełącza sterowanie w zatrzaśnięty tryb `Stop Sell`.
-- Dla zapisu aktywnego slotu dodano oczekiwanie na opóźnione potwierdzenie Deye do 90 sekund. W tym czasie transakcja nie jest ponawiana, ustawienia domyślne nie są przedwcześnie przywracane, a diagnostyka pokazuje etap oraz wartości oczekiwane i odczytane.
+- Dla zapisu aktywnego slotu dodano nasłuchiwanie zmian encji Deye oraz odczyt kontrolny co kilka sekund, z limitem oczekiwania 90 sekund. W tym czasie transakcja nie jest ponawiana, ustawienia domyślne nie są przedwcześnie przywracane, a diagnostyka pokazuje etap oraz wartości oczekiwane i odczytane.
 - Dodano walidację fizycznych encji Deye Time Of Use oraz świadomy przycisk/usługę `resume_manager` („Włącz Manager i harmonogram”). Włącza `Schedule` i Scheduler, lecz nie zmienia flagi `Grid` w żadnym slocie.
 - Flaga `Grid` jest jedyną zgodą na Grid Charge: `Grid: nie` zawsze zapisuje wyłączony Grid Charge, także w trybie `Charge`; `charge_current` pozostaje limitem całkowitego ładowania baterii, a `grid_charge_current` limitem ładowania z sieci.
 - Uproszczono slot do jednego pola **Minimalny SOC sprzedaży**. Ta sama wartość jest zapisywana do fizycznego SOC zakresu TOU Deye; jako warunek blokujący jest używana tylko dla `Selling First`. Kompresja sześciu zakresów używa tego SOC oraz Grid Charge.

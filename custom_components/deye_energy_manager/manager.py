@@ -7,7 +7,11 @@ import math
 from typing import Any
 
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.event import async_track_point_in_time, async_track_time_interval
+from homeassistant.helpers.event import (
+    async_track_point_in_time,
+    async_track_state_change_event,
+    async_track_time_interval,
+)
 from homeassistant.helpers.storage import Store
 from homeassistant.util.dt import now as ha_now
 
@@ -185,10 +189,13 @@ class DeyeEnergyManagerRuntime:
     control_confirmation_timeout: float = 90.0
     _pending_control_transaction: dict[str, Any] = field(default_factory=dict)
     unsub_confirmation_timer: Any = None
+    unsub_confirmation_listener: Any = None
+    unsub_confirmation_poll: Any = None
     unsub_timer: Any = None
     entities: list[Any] = field(default_factory=list)
     _last_tou_signature: str = ""
     _last_slot_failure_signature: str = ""
+    _last_sell_block_signature: str = ""
     _operation_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     def __post_init__(self) -> None:
@@ -830,6 +837,9 @@ class DeyeEnergyManagerRuntime:
             return f"Mapowanie wymaga {len(self._compress_schedule_segments())} zakresów; Deye obsługuje 6"
         if status == "NO DATA":
             return "Brak wymaganych danych lub encji sterujących falownikiem"
+        if status == "SELL BLOCKED":
+            issue = self._selling_slot_guard_issue()
+            return issue[1] if issue else "Sprzedaż wstrzymana przez warunek aktywnego slotu"
         if status == "PRICE TOO LOW":
             price = self.state_float(self.price_sensor, 0)
             return f"Cena {price:.2f} PLN/kWh jest niższa od progu {self.active_min_sell_price:.2f} PLN/kWh"
@@ -1901,6 +1911,52 @@ class DeyeEnergyManagerRuntime:
             and self.control_mode != "Protect Battery"
         )
 
+    def _selling_slot_guard_issue(self) -> tuple[str, str] | None:
+        """Classify a Selling First guard as a normal block or a data error.
+
+        A valid SOC or price below the slot threshold is an expected runtime
+        condition, not a failed Deye transaction.  An absent or malformed
+        source remains an error because the manager cannot make a safe
+        selling decision from it.
+        """
+        if not (
+            self.control_mode == "Schedule"
+            and self.active_slot.enabled
+            and self.active_slot.mode == MODE_SELLING_FIRST
+        ):
+            return None
+
+        if self.soc_guard_enabled and self.active_min_sell_soc > 0:
+            soc = self.state_float_or_none(self.battery_soc_sensor)
+            if soc is None or not 0 <= soc <= 100:
+                return ("error", "Brak poprawnego odczytu SOC dla sprzedaży")
+            if soc < self.active_min_sell_soc:
+                return (
+                    "blocked",
+                    f"Sprzedaż wstrzymana: SOC {soc:.0f}% jest niższy od limitu "
+                    f"{self.active_min_sell_soc:.0f}%",
+                )
+
+        if self.active_min_sell_price > 0:
+            price = self.state_float_or_none(self.price_sensor)
+            if price is None:
+                return ("error", "Brak poprawnego odczytu ceny sprzedaży")
+            if price < self.active_min_sell_price:
+                return (
+                    "blocked",
+                    f"Sprzedaż wstrzymana: cena {price:.2f} PLN/kWh jest niższa od progu "
+                    f"{self.active_min_sell_price:.2f} PLN/kWh",
+                )
+        return None
+
+    def _selling_slot_is_blocked(self) -> bool:
+        issue = self._selling_slot_guard_issue()
+        return issue is not None and issue[0] == "blocked"
+
+    def _sell_block_fingerprint(self, reason: str) -> str:
+        """Identify one continuous, normal sale block without repeated writes."""
+        return f"{self.active_slot_key()}:{reason.split(':', 1)[0]}"
+
     @property
     def charge_allowed(self) -> bool:
         """Compatibility status for manual charge controls.
@@ -1920,7 +1976,7 @@ class DeyeEnergyManagerRuntime:
             self.control_mode == "Schedule"
             and self.active_slot.enabled
             and self.active_slot.mode == MODE_SELLING_FIRST
-            and not self.price_ok
+            and self._selling_slot_is_blocked()
         ):
             return self.default_work_mode
         if self.control_mode == "Schedule" and self.active_slot.enabled and (
@@ -1935,7 +1991,7 @@ class DeyeEnergyManagerRuntime:
             return self.manual_sell_power
         if self.control_mode != "Schedule":
             return self.default_sell_power
-        if self.active_slot.enabled and self.active_slot.mode == MODE_SELLING_FIRST and not self.price_ok:
+        if self.active_slot.enabled and self.active_slot.mode == MODE_SELLING_FIRST and self._selling_slot_is_blocked():
             return self.default_sell_power
         if self.active_slot.enabled and (self.active_slot.mode == MODE_CHARGE or self.active_slot.charge_enabled):
             return self.default_sell_power
@@ -1947,7 +2003,7 @@ class DeyeEnergyManagerRuntime:
             return self.manual_discharge_current
         if self.control_mode != "Schedule":
             return self.default_discharge_current
-        if self.active_slot.enabled and self.active_slot.mode == MODE_SELLING_FIRST and not self.price_ok:
+        if self.active_slot.enabled and self.active_slot.mode == MODE_SELLING_FIRST and self._selling_slot_is_blocked():
             return self.default_discharge_current
         if self.active_slot.enabled and (self.active_slot.mode == MODE_CHARGE or self.active_slot.charge_enabled):
             return self.default_discharge_current
@@ -1961,7 +2017,7 @@ class DeyeEnergyManagerRuntime:
             self.control_mode == "Schedule"
             and self.active_slot.enabled
             and self.active_slot.mode == MODE_SELLING_FIRST
-            and not self.price_ok
+            and self._selling_slot_is_blocked()
         ):
             return self.default_charge_current
         if self.control_mode == "Schedule" and self.active_slot.enabled:
@@ -1993,6 +2049,9 @@ class DeyeEnergyManagerRuntime:
                 return "SCHEDULER OFF"
             if not self.active_slot.enabled:
                 return "SLOT DISABLED"
+            guard_issue = self._selling_slot_guard_issue()
+            if guard_issue and guard_issue[0] == "blocked":
+                return "SELL BLOCKED"
             if self.last_schedule_attempt.get("status") == "failed" and self.last_schedule_attempt.get("slot") == self.active_slot_key():
                 return "SCHEDULE APPLY ERROR"
             if self.active_slot.mode == MODE_SELLING_FIRST and not self.soc_ok:
@@ -2160,6 +2219,57 @@ class DeyeEnergyManagerRuntime:
         if self.unsub_confirmation_timer:
             self.unsub_confirmation_timer()
             self.unsub_confirmation_timer = None
+        if self.unsub_confirmation_listener:
+            self.unsub_confirmation_listener()
+            self.unsub_confirmation_listener = None
+        if self.unsub_confirmation_poll:
+            self.unsub_confirmation_poll()
+            self.unsub_confirmation_poll = None
+
+    def _control_confirmation_entities(self) -> list[str]:
+        """Return every Deye entity whose state confirms a control write."""
+        return [
+            entity_id
+            for entity_id in (
+                self.work_mode_select,
+                self.max_sell_power_number,
+                self.discharge_current_number,
+                self.charge_current_number,
+                self.grid_charge_current_number,
+            )
+            if entity_id
+        ]
+
+    def _schedule_pending_control_poll(self, delay: float = 3.0) -> None:
+        """Read pending writes quickly without ever sending them again."""
+        if not self._pending_control_transaction or self.unsub_confirmation_poll:
+            return
+
+        @callback
+        def _on_poll(_now: datetime) -> None:
+            self.unsub_confirmation_poll = None
+            self.hass.async_create_task(self._async_recheck_pending_control())
+
+        self.unsub_confirmation_poll = async_track_point_in_time(
+            self.hass,
+            _on_poll,
+            ha_now() + timedelta(seconds=delay),
+        )
+
+    def _start_pending_control_watchers(self) -> None:
+        """Confirm from Deye state events first, with a read-only poll fallback."""
+        if not self.unsub_confirmation_listener:
+            entities = self._control_confirmation_entities()
+
+            @callback
+            def _on_state_change(_event: Any) -> None:
+                if self._pending_control_transaction:
+                    self.hass.async_create_task(self._async_recheck_pending_control())
+
+            self.unsub_confirmation_listener = async_track_state_change_event(
+                self.hass, entities, _on_state_change
+            )
+        self._schedule_pending_control_poll()
 
     def _schedule_pending_control_timeout(self) -> None:
         """Finish delayed confirmation at the promised deadline, not next tick."""
@@ -2180,10 +2290,20 @@ class DeyeEnergyManagerRuntime:
 
     async def _async_finish_pending_control_confirmation(self) -> None:
         """Perform one final serialized read when the confirmation window ends."""
+        await self._async_recheck_pending_control()
+
+    async def _async_recheck_pending_control(self) -> None:
+        """Recheck a pending write under the transaction lock without re-writing."""
         async with self._operation_lock:
-            if not self._pending_control_transaction:
+            pending = self._pending_control_transaction
+            if not pending:
                 return
-            await self._async_tick_impl()
+            await self._async_confirm_or_wait_for_control(
+                dict(pending.get("expected") or {}),
+                str(pending.get("stage") or "potwierdzenie falownika"),
+            )
+            if self._pending_control_transaction:
+                self._schedule_pending_control_poll()
 
     async def _async_confirm_or_wait_for_control(
         self, expected: dict[str, Any], stage: str, *, started: bool = False
@@ -2230,6 +2350,7 @@ class DeyeEnergyManagerRuntime:
             }
             pending = self._pending_control_transaction
             self._schedule_pending_control_timeout()
+            self._start_pending_control_watchers()
         elapsed = max(0.0, now - float(pending.get("started_at", now)))
         remaining = max(0, math.ceil(self.control_confirmation_timeout - elapsed))
         if elapsed < self.control_confirmation_timeout:
@@ -2714,9 +2835,18 @@ class DeyeEnergyManagerRuntime:
             and self.active_slot.enabled
             and self.active_slot.mode == MODE_SELLING_FIRST
         )
-        if sell_requested and not self.sell_allowed:
-            reason = "Błąd ceny" if not self.price_ok else "Błąd lub brak odczytu SOC"
-            return await self._async_handle_slot_failure(reason, "warunki sprzedaży", {})
+        sell_block_reason = ""
+        if sell_requested:
+            guard_issue = self._selling_slot_guard_issue()
+            if guard_issue and guard_issue[0] == "error":
+                return await self._async_handle_slot_failure(
+                    guard_issue[1], "warunki sprzedaży", {}
+                )
+            if guard_issue and guard_issue[0] == "blocked":
+                sell_block_reason = guard_issue[1]
+            elif not self.sell_allowed:
+                reason = "Błąd ceny" if not self.price_ok else "Błąd lub brak odczytu SOC"
+                return await self._async_handle_slot_failure(reason, "warunki sprzedaży", {})
         target_mode = self.target_mode
         target_sell_power = self.target_sell_power
         target_discharge_current = self.target_discharge_current
@@ -2734,6 +2864,27 @@ class DeyeEnergyManagerRuntime:
         pending_result = await self._async_confirm_or_wait_for_control(expected, "potwierdzenie falownika")
         if pending_result is not None:
             return pending_result
+        if sell_block_reason:
+            block_signature = self._sell_block_fingerprint(sell_block_reason)
+            if block_signature == self._last_sell_block_signature:
+                unconfirmed = await self.async_verify_control_values(
+                    expected["System Work Mode"],
+                    float(expected["Max Sell Power"]),
+                    float(expected["Prąd rozładowania"]),
+                    float(expected["Prąd ładowania baterii"]),
+                    float(expected["Prąd ładowania z sieci"]),
+                )
+                if not unconfirmed:
+                    self.record_schedule_attempt(
+                        "blocked", "warunki sprzedaży", expected, sell_block_reason
+                    )
+                    self.last_action = sell_block_reason
+                    self.last_error = ""
+                    self.notify_update()
+                    return True
+            self._last_sell_block_signature = block_signature
+        else:
+            self._last_sell_block_signature = ""
         stage = "walidacja planu"
         self.record_schedule_attempt("pending", stage, expected)
         try:

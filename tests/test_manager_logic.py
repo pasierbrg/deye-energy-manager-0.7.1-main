@@ -26,6 +26,7 @@ def _install_home_assistant_stubs() -> None:
     core.callback = lambda function: function
     event.async_track_time_interval = lambda *_args, **_kwargs: lambda: None
     event.async_track_point_in_time = lambda *_args, **_kwargs: lambda: None
+    event.async_track_state_change_event = lambda *_args, **_kwargs: lambda: None
 
     class Store:
         def __init__(self, *_args, **_kwargs):
@@ -346,6 +347,46 @@ class MappingAndTransactionTests(unittest.TestCase):
         self.assertFalse(asyncio.run(runtime.async_apply_targets()))
         self.assert_safe_defaults(runtime)
 
+    def test_low_slot_soc_blocks_sale_without_schedule_error(self):
+        runtime = make_runtime(soc="40")
+        active = configure_selling_slot(runtime)
+        active.minimum_sell_soc = 45
+
+        self.assertTrue(asyncio.run(runtime.async_apply_targets()))
+        self.assertEqual(runtime.manager_status, "SELL BLOCKED")
+        self.assertIn("SOC", runtime.decision_reason)
+        self.assertEqual(runtime.last_schedule_attempt["status"], "applied")
+        self.assertEqual(runtime.last_error, "")
+        self.assertEqual(
+            runtime.hass.states.get(const.DEFAULT_WORK_MODE_SELECT).state,
+            runtime.default_work_mode,
+        )
+        self.assertEqual(
+            runtime.hass.states.get(const.DEFAULT_MAX_SELL_POWER).state,
+            str(runtime.default_sell_power),
+        )
+
+        calls_after_first_block = list(runtime.hass.services.calls)
+        self.assertTrue(asyncio.run(runtime.async_apply_targets()))
+        self.assertEqual(runtime.hass.services.calls, calls_after_first_block)
+        self.assertEqual(runtime.last_schedule_attempt["status"], "blocked")
+        self.assertIn("SOC", runtime.last_action)
+
+    def test_low_slot_price_blocks_sale_without_schedule_error(self):
+        runtime = make_runtime(price="0.15")
+        active = configure_selling_slot(runtime)
+        active.min_sell_price = 0.20
+
+        self.assertTrue(asyncio.run(runtime.async_apply_targets()))
+        self.assertEqual(runtime.manager_status, "SELL BLOCKED")
+        self.assertIn("cena", runtime.decision_reason)
+        self.assertEqual(runtime.last_schedule_attempt["status"], "applied")
+        self.assertEqual(runtime.last_error, "")
+        self.assertEqual(
+            runtime.hass.states.get(const.DEFAULT_WORK_MODE_SELECT).state,
+            runtime.default_work_mode,
+        )
+
     def test_direct_selling_is_blocked_without_soc(self):
         runtime = make_runtime(soc=None)
         with self.assertRaises(ValueError):
@@ -458,13 +499,13 @@ class MappingAndTransactionTests(unittest.TestCase):
         self.assertEqual(len(select_calls), 1)
         self.assertEqual(runtime.last_schedule_attempt["status"], "pending")
         self.assertEqual(runtime.manager_status, "SELLING ACTIVE")
-        # Deye may publish the selected mode later.  The next tick must only
-        # confirm the first transaction, never write the whole slot again.
+        # Deye may publish the selected mode later.  A fast confirmation
+        # recheck must only read the first transaction, never write it again.
         runtime.hass.states.values[const.DEFAULT_WORK_MODE_SELECT] = FakeState(
             const.MODE_SELLING_FIRST,
             entity_id=const.DEFAULT_WORK_MODE_SELECT,
         )
-        self.assertTrue(asyncio.run(runtime.async_apply_targets()))
+        asyncio.run(runtime._async_recheck_pending_control())
         select_calls = [call for call in runtime.hass.services.calls if call[:2] == ("select", "select_option")]
         self.assertEqual(len(select_calls), 1)
         self.assertEqual(runtime.last_schedule_attempt["status"], "applied")
