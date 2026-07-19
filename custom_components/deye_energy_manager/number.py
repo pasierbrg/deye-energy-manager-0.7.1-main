@@ -79,6 +79,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         DeyeManagerNumber(runtime, "default_discharge_current", "Default discharge current", "default_discharge_current", 0, 240, 5, "A"),
         DeyeManagerNumber(runtime, "default_charge_current", "Default charge current", "default_charge_current", 0, 240, 5, "A"),
         DeyeManagerNumber(runtime, "default_grid_charge_current", "Default grid charge current", "default_grid_charge_current", 0, 240, 5, "A"),
+        DeyeManagerNumber(runtime, "charge_profile_charge_current", "Charge profile battery charge current", "charge_profile_charge_current", 0, 240, 5, "A"),
+        DeyeManagerNumber(runtime, "charge_profile_discharge_current", "Charge profile discharge current", "charge_profile_discharge_current", 0, 240, 5, "A"),
+        DeyeManagerNumber(runtime, "charge_profile_grid_charge_current", "Charge profile grid charge current", "charge_profile_grid_charge_current", 0, 240, 5, "A"),
+        DeyeManagerNumber(runtime, "charge_profile_target_soc", "Charge profile target SOC", "charge_profile_target_soc", 0, 100, 1, "%"),
     ]
     for key, label, *_ in SLOTS:
         entities.extend(

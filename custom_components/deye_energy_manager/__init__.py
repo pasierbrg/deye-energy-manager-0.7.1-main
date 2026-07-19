@@ -44,6 +44,14 @@ SCHEDULE_PATCH_SCHEMA = vol.Schema(
 TARIFF_SETTINGS_SCHEMA = vol.Schema(
     {vol.Required("data"): vol.All(cv.string, vol.Length(max=50000))}
 )
+CHARGE_PROFILE_SCHEMA = vol.Schema(
+    {
+        vol.Required("charge_current"): vol.All(vol.Coerce(float), vol.Range(min=0, max=240)),
+        vol.Required("discharge_current"): vol.All(vol.Coerce(float), vol.Range(min=0, max=240)),
+        vol.Required("grid_charge_current"): vol.All(vol.Coerce(float), vol.Range(min=0, max=240)),
+        vol.Required("target_soc"): vol.All(vol.Coerce(float), vol.Range(min=0, max=100)),
+    }
+)
 SERVICE_NAMES = (
     "apply_settings",
     "manual_sell",
@@ -60,6 +68,7 @@ SERVICE_NAMES = (
     "set_slot_grid_charge",
     "apply_schedule_patch",
     "save_tariff_settings",
+    "save_charge_profile",
     "refresh_tariff_catalog",
     "save_future_plan",
     "cancel_future_plan",
@@ -162,6 +171,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             options={**entry.options, **normalized},
         )
 
+    async def handle_save_charge_profile(call: ServiceCall) -> None:
+        await runtime.async_save_charge_profile(dict(call.data))
+
     async def handle_refresh_tariff_catalog(call: ServiceCall) -> None:
         await runtime.async_refresh_tariff_catalog()
 
@@ -203,6 +215,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "save_tariff_settings",
         handle_save_tariff_settings,
         schema=TARIFF_SETTINGS_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        "save_charge_profile",
+        handle_save_charge_profile,
+        schema=CHARGE_PROFILE_SCHEMA,
     )
     hass.services.async_register(
         DOMAIN,

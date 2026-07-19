@@ -1108,14 +1108,33 @@ class DeyeEnergyManagerCard extends HTMLElement {
     return this.optimisticService(entityId, parsed, "number", "set_value", { entity_id: entityId, value: parsed });
   }
 
+  async saveChargeProfile() {
+    const fields = [...this.querySelectorAll("[data-charge-profile-number]")];
+    const values = {};
+    for (const field of fields) {
+      const value = Number(String(field.value).replace(",", "."));
+      if (!Number.isFinite(value)) {
+        this.failSave("charge_profile", new Error("Wprowadź poprawne wartości profilu ładowania"));
+        return false;
+      }
+      values[field.dataset.chargeProfileNumber] = value;
+    }
+    this.beginSave();
+    try {
+      await this.callService("deye_energy_manager", "save_charge_profile", values);
+      this.finishSave();
+      return true;
+    } catch (error) {
+      this.failSave("charge_profile", error);
+      return false;
+    }
+  }
+
   setSelect(entityId, option) {
     if (!this.exists(entityId)) return Promise.resolve(false);
-    const request = this.optimisticService(entityId, option, "select", "select_option", { entity_id: entityId, option });
-    if (option === "Charge" && /_slot_.*_mode$/.test(entityId)) {
-      const gridEntity = entityId.replace(/^select\./, "switch.").replace(/_mode$/, "_charge_enabled");
-      if (this.exists(gridEntity)) this.turnSwitch(gridEntity, true);
-    }
-    return request;
+    // The mode never implies permission to charge from the grid.  That
+    // permission is controlled solely by „Ładowanie z sieci” in the slot.
+    return this.optimisticService(entityId, option, "select", "select_option", { entity_id: entityId, option });
   }
 
   turnSwitch(entityId, value) {
@@ -1180,6 +1199,13 @@ class DeyeEnergyManagerCard extends HTMLElement {
   numberInput(entityId, unit = "") {
     return `<label class="field">
       <input data-number="${this.escapeHtml(entityId)}" type="text" inputmode="decimal" value="${this.escapeHtml(this.numberState(entityId))}" ${this.exists(entityId) ? "" : "disabled"}>
+      <span>${this.escapeHtml(unit)}</span>
+    </label>`;
+  }
+
+  chargeProfileInput(name, entityId, unit = "") {
+    return `<label class="field">
+      <input data-charge-profile-number="${this.escapeHtml(name)}" type="text" inputmode="decimal" value="${this.escapeHtml(this.numberState(entityId))}" ${this.exists(entityId) ? "" : "disabled"}>
       <span>${this.escapeHtml(unit)}</span>
     </label>`;
   }
@@ -1694,6 +1720,9 @@ class DeyeEnergyManagerCard extends HTMLElement {
 
   readMode(rawStatus) {
     const status = String(rawStatus || "").toUpperCase();
+    if (status.includes("SELL BLOCKED")) return ["Sprzedaż zatrzymana", "warn"];
+    if (status.includes("GRID CHARGE")) return ["Ładowanie z sieci według harmonogramu", "charge"];
+    if (status.includes("PV CHARGE")) return ["Ładowanie z PV według harmonogramu", "charge"];
     if (status.includes("EMERGENCY")) return ["Awaryjnie zatrzymany", "bad"];
     if (status.includes("MAPPING ERROR")) return ["Błąd mapowania Deye", "bad"];
     if (status.includes("SCHEDULE APPLY ERROR")) return ["Nie zastosowano bie\u017c\u0105cego slotu", "bad"];
@@ -3100,19 +3129,30 @@ class DeyeEnergyManagerCard extends HTMLElement {
       let body = "";
       if (tab === "defaults") {
         body = `
+          <h3>Ustawienia domyślne dla falownika</h3>
           ${this.row("Domyślny tryb falownika", this.selectInput(this.entity("select", "default_work_mode"), this.inverterWorkModes()))}
-          ${this.row("Domyślna moc sprzedaży", this.numberInput(this.entity("number", "default_sell_power"), "W"))}
+          ${this.row("Domyślny limit mocy sprzedaży", this.numberInput(this.entity("number", "default_sell_power"), "W"))}
           ${this.row("Domyślny prąd rozładowania", this.numberInput(this.entity("number", "default_discharge_current"), "A"))}
           ${this.row("Domyślny prąd ładowania baterii", this.numberInput(this.entity("number", "default_charge_current"), "A"))}
           ${this.row("Domyślny prąd ładowania z sieci", this.numberInput(this.entity("number", "default_grid_charge_current"), "A"))}
           <button class="wide-action" data-action="apply-defaults" data-default-action="1" data-default-label="Zastosuj ustawienia domyślne teraz" ${this._defaultsApplying ? "disabled" : ""}>${this._defaultsApplying ? "Stosowanie ustawień domyślnych…" : "Zastosuj ustawienia domyślne teraz"}</button>
           <div class="hint defaults-status ${this._defaultsStatus}" data-defaults-status ${this._defaultsMessage ? "" : "hidden"}>${this.escapeHtml(this._defaultsMessage)}</div>`;
+      } else if (tab === "charging") {
+        body = `
+          <h3>Ustawienia ładowania</h3>
+          <div class="hint">Profil jest stosowany przez każdy aktywny slot <strong>Charge</strong>. Ładowanie z sieci jest włączane wyłącznie wtedy, gdy w tym slocie wybierzesz „Ładowanie z sieci: tak”.</div>
+          ${this.row("Tryb ładowania", "Charge")}
+          ${this.row("Prąd ładowania", this.chargeProfileInput("charge_current", this.entity("number", "charge_profile_charge_current"), "A"))}
+          ${this.row("Prąd rozładowania", this.chargeProfileInput("discharge_current", this.entity("number", "charge_profile_discharge_current"), "A"))}
+          ${this.row("Prąd ładowania z sieci", this.chargeProfileInput("grid_charge_current", this.entity("number", "charge_profile_grid_charge_current"), "A"))}
+          ${this.row("Docelowy SOC", this.chargeProfileInput("target_soc", this.entity("number", "charge_profile_target_soc"), "%"))}
+          <button class="wide-action" data-save-charge-profile="1">Zapisz ustawienia ładowania</button>`;
       } else if (tab === "tou") {
         body = `<div class="hint">Sześć fizycznych slotów Deye. Zakres kończy się na starcie następnego slotu.</div>
           <table class="settings-table"><thead><tr><th>Slot</th><th>Od</th><th>Do</th><th>SOC</th><th>Prąd</th><th>Ładowanie z sieci</th><th>Akcja</th></tr></thead><tbody>${touRows}</tbody></table>`;
       } else if (tab === "mapping") {
         body = `<div class="hint">${this.mapWarning(slots)}. Harmonogram 24h jest kompresowany do zakresów zgodnych z 6 slotami Deye.</div>
-          <table class="settings-table"><thead><tr><th>Slot Deye</th><th>Od</th><th>Do</th><th>Funkcja</th><th>Grid</th><th>SOC</th></tr></thead><tbody>${segmentRows}</tbody></table>`;
+          <table class="settings-table"><thead><tr><th>Slot Deye</th><th>Od</th><th>Do</th><th>Funkcja</th><th>Ładowanie z sieci</th><th>SOC</th></tr></thead><tbody>${segmentRows}</tbody></table>`;
       } else if (tab === "ai") {
         body = `
           <div class="hint">Inteligentny optymalizator 0.7.6 analizuje dane i pokazuje sugestie. Harmonogram zmienia dopiero po ręcznym wyborze godzin i potwierdzeniu.</div>
@@ -3152,7 +3192,8 @@ class DeyeEnergyManagerCard extends HTMLElement {
           <div class="dialog-head"><strong>Ustawienia i diagnostyka</strong><button type="button" data-close-dialog="1">${this.iconSvg("close")}</button></div>
           <div class="settings-layout">
             <nav class="settings-nav">
-              ${tabButton("defaults", "Ustawienia domyślne")}
+              ${tabButton("defaults", "Ustawienia Trybów")}
+              ${tabButton("charging", "Ustawienia ładowania")}
               ${tabButton("tou", "Deye Time Of Use")}
               ${tabButton("mapping", "Mapowanie 24h")}
               ${tabButton("ai", "AI i analiza")}
@@ -3702,6 +3743,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
     }));
     this.querySelectorAll("[data-apply-multi]").forEach((el) => el.addEventListener("click", () => this.applyMultiEdit(slots)));
     this.querySelectorAll("[data-action='apply-defaults']").forEach((el) => el.addEventListener("click", () => this.restoreDefaults()));
+    this.querySelectorAll("[data-save-charge-profile]").forEach((el) => el.addEventListener("click", () => this.saveChargeProfile()));
     this.querySelectorAll("[data-action='select-all']").forEach((el) => el.addEventListener("click", () => {
       slots.forEach(([key]) => this._selectedSlots.add(key));
       this._selectionMode = true;

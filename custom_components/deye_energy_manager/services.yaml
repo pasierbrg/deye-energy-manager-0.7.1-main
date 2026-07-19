@@ -75,7 +75,7 @@ restore_defaults:
   description: Ręcznie zastosuj ustawienia zapisane przez użytkownika w oknie Ustawienia domyślne.
 resume_manager:
   name: Włącz Manager i harmonogram
-  description: "Świadomie włącza tryb Schedule i Scheduler po Stop Sell lub zatrzymaniu awaryjnym. Nie zmienia flagi Grid w slotach; tylko Grid: tak zezwala na ładowanie z sieci."
+  description: "Świadomie włącza tryb Schedule i Scheduler po Stop Sell lub zatrzymaniu awaryjnym. Nie zmienia ustawienia Ładowanie z sieci w slotach; tylko wartość tak zezwala na ładowanie z sieci."
 emergency_stop:
   name: Emergency stop
   description: Natychmiast zatrzaśnij sterowanie managera i zastosuj 1:1 pełny zestaw ustawień domyślnych użytkownika, włącznie z wybranym trybem.
@@ -135,6 +135,42 @@ save_tariff_settings:
       selector:
         text:
           multiline: true
+save_charge_profile:
+  name: Zapisz ustawienia ładowania
+  description: Zapisuje pełny profil używany wyłącznie przez sloty harmonogramu w trybie Charge.
+  fields:
+    charge_current:
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 240
+          step: 5
+          unit_of_measurement: A
+    discharge_current:
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 240
+          step: 5
+          unit_of_measurement: A
+    grid_charge_current:
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 240
+          step: 5
+          unit_of_measurement: A
+    target_soc:
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
 refresh_tariff_catalog:
   name: Odśwież katalog taryf OSD
   description: Sprawdza wersjonowany katalog taryf. W razie błędu zachowuje ostatnią poprawną lub wbudowaną wersję.

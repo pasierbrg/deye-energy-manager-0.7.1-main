@@ -15,10 +15,10 @@
 - Błąd mapowania ponad 6 zakresów zatrzymuje operację i stosuje 1:1 pełne ustawienia domyślne użytkownika.
 - Dodano zakresy walidacji dla mocy, prądów, SOC i cen.
 - Zatrzymanie awaryjne przełącza sterowanie w zatrzaśnięty tryb `Stop Sell`.
-- Dla zapisu aktywnego slotu dodano nasłuchiwanie zmian encji Deye oraz odczyt kontrolny co kilka sekund, z limitem oczekiwania 90 sekund. W tym czasie transakcja nie jest ponawiana, ustawienia domyślne nie są przedwcześnie przywracane, a diagnostyka pokazuje etap oraz wartości oczekiwane i odczytane.
+- Dla zapisu aktywnego slotu dodano nasłuchiwanie zmian encji Deye oraz szybkie odczyty kontrolne po 1, 2 i 4 sekundach, z limitem oczekiwania 90 sekund. W tym czasie transakcja nie jest ponawiana, ustawienia domyślne nie są przedwcześnie przywracane, a diagnostyka pokazuje etap oraz wartości oczekiwane i odczytane.
 - Dodano walidację fizycznych encji Deye Time Of Use oraz świadomy przycisk/usługę `resume_manager` („Włącz Manager i harmonogram”). Włącza `Schedule` i Scheduler, lecz nie zmienia flagi `Grid` w żadnym slocie.
-- Flaga `Grid` jest jedyną zgodą na Grid Charge: `Grid: nie` zawsze zapisuje wyłączony Grid Charge, także w trybie `Charge`; `charge_current` pozostaje limitem całkowitego ładowania baterii, a `grid_charge_current` limitem ładowania z sieci.
-- Uproszczono slot do jednego pola **Minimalny SOC sprzedaży**. Ta sama wartość jest zapisywana do fizycznego SOC zakresu TOU Deye; jako warunek blokujący jest używana tylko dla `Selling First`. Kompresja sześciu zakresów używa tego SOC oraz Grid Charge.
+- Pole **Ładowanie z sieci** jest jedyną zgodą na Deye Grid Charge: wartość `nie` zawsze zapisuje wyłączony Grid Charge, także w trybie `Charge`; `charge_current` pozostaje limitem całkowitego ładowania baterii, a `grid_charge_current` limitem ładowania z sieci.
+- Dodano osobny profil **Ustawienia ładowania** dla aktywnych slotów `Charge`: prąd ładowania, prąd rozładowania, prąd ładowania z sieci oraz docelowy SOC. **Minimalny SOC sprzedaży** pozostaje warunkiem tylko dla `Selling First`; do fizycznego SOC zakresu TOU dla Charge trafia wyłącznie docelowy SOC profilu.
 - Usunięto aktywny przełącznik `charge_scheduler_enabled` z logiki sterowania. Parametry falownika wynikają z aktywnego slotu.
 - Po błędzie tego samego aktywnego slotu ustawienia domyślne są stosowane tylko raz; kolejna próba wymaga zmiany encji, harmonogramu, slotu albo świadomego wznowienia Managera.
 
@@ -26,7 +26,7 @@
 
 - Dodano usługę `apply_schedule_patch` do atomowych operacji zbiorczych.
 - Edycja zbiorcza i zastosowanie sugestii korzystają z jednej operacji backendowej.
-- Tryb `Charge` nie jest zgodą na Grid Charge; zgodę określa wyłącznie flaga `Grid` aktywnego slotu.
+- Tryb `Charge` nie jest zgodą na Grid Charge; zgodę określa wyłącznie pole **Ładowanie z sieci** aktywnego slotu.
 - Nieudana aktualizacja przywraca logiczną konfigurację slotów.
 
 ### Dane i konfiguracja
@@ -48,6 +48,8 @@
 
 ### Karta i UX
 
+- Pole statusu karty tłumaczy `SELL BLOCKED` jako **Sprzedaż zatrzymana**; pełna przyczyna pozostaje widoczna jako decyzja managera.
+- Obie dystrybuowane kopie karty mają identyczną zawartość i rewizję zasobu `v=0771`.
 - Poprawiono zabezpieczanie dynamicznych wartości HTML.
 - Usunięto błędnie wyświetlane encje numeryczne HTML, m.in. w nazwie strategii „Zrównoważony”.
 - Dodano zakładkę `Taryfa i dystrybucja` z wyborem operatora, taryfy i trybu katalogu, jawnym przyciskiem zapisu, diagnostyką aktualizacji oraz profilem 48h dla dziś i jutra.
