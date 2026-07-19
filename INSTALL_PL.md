@@ -80,4 +80,6 @@ Plan na jutro wymaga ręcznego zaznaczenia godzin i potwierdzenia przyciskiem **
 
 W 0.7.6 warunek SOC jest sprawdzany wyłącznie dla aktywnego slotu `Selling First`, gdy ma ustawiony minimalny SOC sprzedaży. Brak SOC nie blokuje slotu `Zero Export` ani nie jest zastępowany sztuczną wartością.
 
+Każdy slot ma jedno pole **Minimalny SOC sprzedaży**. Ta wartość jest zapisywana również jako fizyczny SOC odpowiedniego zakresu Deye Time Of Use. Nie ma osobnego pola „SOC TOU Deye”. Po zapisie falownik może opublikować nowy stan z opóźnieniem: integracja oczekuje na jego potwierdzenie maksymalnie 90 sekund bez ponownego wysyłania tej samej transakcji; w tym czasie diagnostyka pokazuje oczekiwanie, a nie błąd.
+
 Stop Sell, zatrzymanie awaryjne oraz błąd sterowania nie zerują automatycznie mocy ani prądów Deye. Integracja stosuje 1:1 pełny zestaw zapisany w **Ustawieniach domyślnych**, włącznie z trybem `Zero Export To CT`, `Zero Export To Load` albo `Selling First`. Integracja nie odgaduje topologii instalacji i nie zastępuje wybranego trybu innym. Przycisk **Zastosuj ustawienia domyślne teraz** pozwala wykonać świadome ręczne przywrócenie.

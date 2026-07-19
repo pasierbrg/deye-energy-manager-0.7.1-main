@@ -43,7 +43,7 @@ Pełna lista znajduje się w [CHANGELOG.md](CHANGELOG.md).
 - 24 godzinne sloty sprzedaży i ładowania;
 - tryby `Selling First`, `Zero Export To Load`, `Zero Export To CT` i `Charge`;
 - kompresja harmonogramu do 6 fizycznych slotów Deye Time Of Use;
-- niezależne: minimalny SOC sprzedaży oraz fizyczny SOC zakresu Deye Time Of Use;
+- jeden parametr **Minimalny SOC sprzedaży** dla slotu: jest zapisywany jako fizyczny SOC zakresu Deye Time Of Use, a warunek sprzedaży stosuje się wyłącznie w trybie `Selling First`;
 - `Grid: tak` jest jedyną zgodą na ładowanie baterii z sieci; `Grid: nie` pozostawia Grid Charge wyłączone;
 - ręczne i zbiorcze edytowanie harmonogramu;
 - inteligentne sugestie Dziś/Jutro bazujące na cenach energii i dystrybucji, Solcast, pogodzie, SOC i wyuczonym profilu zużycia;
@@ -165,6 +165,7 @@ Przykład kompletnego dashboardu znajduje się w `dashboard/energy_manager.yaml`
 
 - Brak poprawnego odczytu SOC albo ceny blokuje `Selling First` tylko wtedy, gdy aktywny slot wymaga minimalnego SOC albo minimalnej ceny sprzedaży. Nie blokuje slotów `Zero Export`.
 - Aktualizacja ustawień zapisuje i potwierdza wartości liczbowe przed ustawieniem docelowego trybu falownika; integracja nie zastępuje wybranego trybu innym.
+- Falownik może publikować nowy stan z opóźnieniem: po pojedynczym zapisie integracja oczekuje na potwierdzenie maksymalnie 90 sekund, bez ponawiania tej samej transakcji i bez przedwczesnego powrotu do ustawień domyślnych.
 - Mapowanie ponad 6 zakresów nie jest zapisywane do Deye.
 - Ustawienia zapisane w oknie **Ustawienia domyślne** są stanem powrotu po zatrzymaniu lub błędzie.
 - Stop Sell, zatrzymanie awaryjne oraz błędy SOC, ceny, mapowania i zapisu stosują 1:1 domyślny tryb, domyślną moc oraz trzy domyślne prądy użytkownika. Integracja nie zapisuje automatycznie wartości `0`, chyba że użytkownik sam zapisał ją jako domyślną.

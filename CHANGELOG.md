@@ -15,10 +15,10 @@
 - Błąd mapowania ponad 6 zakresów zatrzymuje operację i stosuje 1:1 pełne ustawienia domyślne użytkownika.
 - Dodano zakresy walidacji dla mocy, prądów, SOC i cen.
 - Zatrzymanie awaryjne przełącza sterowanie w zatrzaśnięty tryb `Stop Sell`.
-- Dla zapisu aktywnego slotu dodano ponowienie i dłuższe potwierdzenie trybu pracy Deye. Przy niepowodzeniu status nie pokazuje już fałszywie aktywnej sprzedaży; diagnostyka zapisuje etap, wartości oczekiwane i odczytane.
+- Dla zapisu aktywnego slotu dodano oczekiwanie na opóźnione potwierdzenie Deye do 90 sekund. W tym czasie transakcja nie jest ponawiana, ustawienia domyślne nie są przedwcześnie przywracane, a diagnostyka pokazuje etap oraz wartości oczekiwane i odczytane.
 - Dodano walidację fizycznych encji Deye Time Of Use oraz świadomy przycisk/usługę `resume_manager` („Włącz Manager i harmonogram”). Włącza `Schedule` i Scheduler, lecz nie zmienia flagi `Grid` w żadnym slocie.
 - Flaga `Grid` jest jedyną zgodą na Grid Charge: `Grid: nie` zawsze zapisuje wyłączony Grid Charge, także w trybie `Charge`; `charge_current` pozostaje limitem całkowitego ładowania baterii, a `grid_charge_current` limitem ładowania z sieci.
-- Rozdzielono minimalny SOC sprzedaży od fizycznego SOC zakresu TOU Deye. Kompresja sześciu zakresów używa wyłącznie SOC TOU i Grid Charge.
+- Uproszczono slot do jednego pola **Minimalny SOC sprzedaży**. Ta sama wartość jest zapisywana do fizycznego SOC zakresu TOU Deye; jako warunek blokujący jest używana tylko dla `Selling First`. Kompresja sześciu zakresów używa tego SOC oraz Grid Charge.
 - Usunięto aktywny przełącznik `charge_scheduler_enabled` z logiki sterowania. Parametry falownika wynikają z aktywnego slotu.
 - Po błędzie tego samego aktywnego slotu ustawienia domyślne są stosowane tylko raz; kolejna próba wymaga zmiany encji, harmonogramu, slotu albo świadomego wznowienia Managera.
 

@@ -25,6 +25,7 @@ def _install_home_assistant_stubs() -> None:
     core.HomeAssistant = object
     core.callback = lambda function: function
     event.async_track_time_interval = lambda *_args, **_kwargs: lambda: None
+    event.async_track_point_in_time = lambda *_args, **_kwargs: lambda: None
 
     class Store:
         def __init__(self, *_args, **_kwargs):
@@ -182,7 +183,6 @@ def make_runtime(soc="50", price="0.50", default_mode=None):
     runtime.default_discharge_current = 120
     runtime.default_charge_current = 120
     runtime.default_grid_charge_current = 60
-    runtime.control_verification_delays = (0.0, 0.0, 0.0)
     return runtime
 
 
@@ -356,7 +356,7 @@ class MappingAndTransactionTests(unittest.TestCase):
         runtime = make_runtime()
         for index, slot in enumerate(runtime.slots.values()):
             slot.enabled = True
-            slot.tou_soc = 10 if index % 2 else 20
+            slot.minimum_sell_soc = 10 if index % 2 else 20
         self.assertTrue(runtime.mapping_error)
         self.assertGreater(len(runtime._compress_schedule_segments()), 6)
         self.assertFalse(asyncio.run(runtime.async_apply_targets()))
@@ -366,7 +366,7 @@ class MappingAndTransactionTests(unittest.TestCase):
         runtime = make_runtime()
         updates = []
         for index, slot_key in enumerate(list(runtime.slots)[:8]):
-            updates.append({"slot_key": slot_key, "enabled": True, "tou_soc": 10 if index % 2 else 20})
+            updates.append({"slot_key": slot_key, "enabled": True, "minimum_sell_soc": 10 if index % 2 else 20})
         with self.assertRaises(ValueError):
             asyncio.run(runtime.async_apply_schedule_patch(updates))
         self.assertTrue(all(not slot.enabled for slot in runtime.slots.values()))
@@ -446,7 +446,7 @@ class MappingAndTransactionTests(unittest.TestCase):
         self.assertEqual(ordered_control_calls[-1][2]["option"], const.MODE_SELLING_FIRST)
         self.assertTrue(all(call[:2] == ("number", "set_value") for call in ordered_control_calls[:-1]))
 
-    def test_delayed_work_mode_is_retried_and_confirmed(self):
+    def test_delayed_work_mode_waits_without_rewriting_and_confirms(self):
         runtime = make_runtime()
         configure_selling_slot(runtime)
         runtime.hass.services.ignore_once(
@@ -455,15 +455,24 @@ class MappingAndTransactionTests(unittest.TestCase):
         )
         self.assertTrue(asyncio.run(runtime.async_apply_targets()))
         select_calls = [call for call in runtime.hass.services.calls if call[:2] == ("select", "select_option")]
-        self.assertGreaterEqual(len(select_calls), 2)
+        self.assertEqual(len(select_calls), 1)
+        self.assertEqual(runtime.last_schedule_attempt["status"], "pending")
+        self.assertEqual(runtime.manager_status, "SELLING ACTIVE")
+        # Deye may publish the selected mode later.  The next tick must only
+        # confirm the first transaction, never write the whole slot again.
+        runtime.hass.states.values[const.DEFAULT_WORK_MODE_SELECT] = FakeState(
+            const.MODE_SELLING_FIRST,
+            entity_id=const.DEFAULT_WORK_MODE_SELECT,
+        )
+        self.assertTrue(asyncio.run(runtime.async_apply_targets()))
+        select_calls = [call for call in runtime.hass.services.calls if call[:2] == ("select", "select_option")]
+        self.assertEqual(len(select_calls), 1)
         self.assertEqual(runtime.last_schedule_attempt["status"], "applied")
-        self.assertEqual(runtime.hass.states.get(const.DEFAULT_WORK_MODE_SELECT).state, const.MODE_SELLING_FIRST)
 
     def test_failed_schedule_is_reported_instead_of_selling_active(self):
         runtime = make_runtime()
         configure_selling_slot(runtime)
-        runtime.control_verification_delays = (0.0, 0.0)
-        runtime.hass.services.ignore_once("select", "select_option", entity_id=const.DEFAULT_WORK_MODE_SELECT, option=const.MODE_SELLING_FIRST)
+        runtime.control_confirmation_timeout = 0
         runtime.hass.services.ignore_once("select", "select_option", entity_id=const.DEFAULT_WORK_MODE_SELECT, option=const.MODE_SELLING_FIRST)
         self.assertFalse(asyncio.run(runtime.async_apply_targets()))
         self.assertEqual(runtime.manager_status, "SCHEDULE APPLY ERROR")
@@ -546,7 +555,7 @@ class GridAndSlotSafetyTests(unittest.TestCase):
         slot.charge_enabled = grid
         slot.charge_current = 120
         slot.grid_charge_current = 60
-        slot.tou_soc = 90
+        slot.minimum_sell_soc = 90
         return slot
 
     def grid_switch_calls(self, runtime):
@@ -613,17 +622,16 @@ class GridAndSlotSafetyTests(unittest.TestCase):
         self.assertTrue(asyncio.run(runtime.async_apply_targets()))
         self.assertEqual(runtime.hass.states.get(const.DEFAULT_WORK_MODE_SELECT).state, const.MODE_ZERO_EXPORT)
 
-    def test_tou_soc_and_minimum_sell_soc_are_independent(self):
+    def test_one_slot_soc_is_used_for_tou_mapping(self):
         runtime = make_runtime()
         for slot in runtime.slots.values():
             slot.enabled = True
-            slot.tou_soc = 40
             slot.minimum_sell_soc = 10 if int(slot.key[:2]) % 2 else 90
-        signature_before = [segment["tou_soc"] for segment in runtime._compress_schedule_segments()]
+        signature_before = [segment["minimum_sell_soc"] for segment in runtime._compress_schedule_segments()]
         for slot in runtime.slots.values():
             slot.minimum_sell_soc = 99 - slot.minimum_sell_soc
-        self.assertEqual(signature_before, [segment["tou_soc"] for segment in runtime._compress_schedule_segments()])
-        self.assertTrue(all(value == 40 for value in signature_before))
+        self.assertNotEqual(signature_before, [segment["minimum_sell_soc"] for segment in runtime._compress_schedule_segments()])
+        self.assertEqual({10, 90}, set(signature_before))
 
     def test_same_slot_failure_restores_defaults_once_per_fingerprint(self):
         runtime = make_runtime()
@@ -684,7 +692,7 @@ class FuturePlanTests(unittest.TestCase):
             "slot_key": "05_06", "enabled": True, "charge_enabled": False,
             "mode": const.MODE_SELLING_FIRST, "sell_power": 5000,
             "discharge_current": 120, "charge_current": 0,
-            "grid_charge_current": 0, "tou_soc": 20, "minimum_sell_soc": 20, "min_sell_price": 0.9,
+            "grid_charge_current": 0, "minimum_sell_soc": 20, "min_sell_price": 0.9,
         }
         asyncio.run(runtime.async_save_future_plan({
             "date": "2026-07-19", "strategy": "balanced",

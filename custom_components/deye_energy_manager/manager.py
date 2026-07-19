@@ -7,7 +7,7 @@ import math
 from typing import Any
 
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.event import async_track_point_in_time, async_track_time_interval
 from homeassistant.helpers.storage import Store
 from homeassistant.util.dt import now as ha_now
 
@@ -120,11 +120,9 @@ class SlotSettings:
     charge_enabled: bool = False
     charge_current: float = 0
     grid_charge_current: float = 0
-    # These values have deliberately different meanings.  ``tou_soc`` is
-    # written to a physical Deye Time Of Use range, while
-    # ``minimum_sell_soc`` is used only to decide whether Selling First is
-    # allowed for this logical hour.
-    tou_soc: float = 0
+    # One user-facing SOC is written to the physical Deye Time Of Use range.
+    # It additionally gates Selling First, but never blocks Zero Export or
+    # Charge slots.
     minimum_sell_soc: float = 0
     min_sell_price: float = 0
 
@@ -184,7 +182,9 @@ class DeyeEnergyManagerRuntime:
     last_saved_at: str = ""
     last_error: str = ""
     last_schedule_attempt: dict[str, Any] = field(default_factory=dict)
-    control_verification_delays: tuple[float, ...] = (0.0, 1.0, 2.0, 4.0)
+    control_confirmation_timeout: float = 90.0
+    _pending_control_transaction: dict[str, Any] = field(default_factory=dict)
+    unsub_confirmation_timer: Any = None
     unsub_timer: Any = None
     entities: list[Any] = field(default_factory=list)
     _last_tou_signature: str = ""
@@ -1029,7 +1029,6 @@ class DeyeEnergyManagerRuntime:
             "discharge_current": (0.0, 240.0),
             "charge_current": (0.0, 240.0),
             "grid_charge_current": (0.0, 240.0),
-            "tou_soc": (0.0, 100.0),
             "minimum_sell_soc": (0.0, 100.0),
             "min_sell_price": (0.0, 5.0),
         }
@@ -1040,11 +1039,12 @@ class DeyeEnergyManagerRuntime:
             raw = dict(raw) if isinstance(raw, dict) else raw
             if not isinstance(raw, dict):
                 raise ValueError("Każda pozycja planu musi być obiektem")
+            # ``tou_soc`` and ``min_soc`` are accepted only as legacy input.
+            # The logical slot now has one SOC value.
+            if "tou_soc" in raw:
+                raw.setdefault("minimum_sell_soc", raw.pop("tou_soc"))
             if "min_soc" in raw:
-                legacy_soc = raw.pop("min_soc")
-                raw.setdefault("tou_soc", legacy_soc)
-                if raw.get("mode") == MODE_SELLING_FIRST:
-                    raw.setdefault("minimum_sell_soc", legacy_soc)
+                raw.setdefault("minimum_sell_soc", raw.pop("min_soc"))
             unknown = set(raw) - allowed
             if unknown:
                 raise ValueError(f"Nieobsługiwane pola planu: {', '.join(sorted(unknown))}")
@@ -2118,7 +2118,13 @@ class DeyeEnergyManagerRuntime:
         self, mode: str | None, sell_power: float, discharge_current: float,
         charge_current: float, grid_charge_current: float,
     ) -> list[str]:
-        """Confirm a complete Deye write, retrying only an unconfirmed work mode."""
+        """Read the current control state once, without writing it again.
+
+        Some Deye integrations publish the requested values several seconds
+        after the service call.  Re-sending a mode during that interval can
+        undo a perfectly valid in-flight change, therefore delayed polling is
+        handled by the pending transaction instead of this verifier.
+        """
         expected_numbers = {
             self.max_sell_power_number: ("Max Sell Power", float(sell_power)),
             self.discharge_current_number: ("Maximum Battery Discharge Current", float(discharge_current)),
@@ -2128,31 +2134,115 @@ class DeyeEnergyManagerRuntime:
         if self.grid_charge_current_number:
             expected_numbers[self.grid_charge_current_number] = ("Maximum Battery Grid Charge Current", float(grid_charge_current))
         unconfirmed: list[str] = []
-        for attempt, delay in enumerate(self.control_verification_delays):
-            if delay:
-                await asyncio.sleep(delay)
-            unconfirmed = []
-            mode_unconfirmed = False
-            if mode is not None:
-                mode_state = self.hass.states.get(self.work_mode_select)
-                if mode_state is None or str(mode_state.state) != mode:
-                    actual_mode = "brak" if mode_state is None else str(mode_state.state)
-                    unconfirmed.append(f"System Work Mode={actual_mode} (oczekiwano {mode})")
-                    mode_unconfirmed = True
-            for entity_id, (label, expected) in expected_numbers.items():
-                state = self.hass.states.get(entity_id)
-                actual = None if state is None else self.safe_float(state.state, float("nan"))
-                if actual is None or not math.isfinite(actual) or not math.isclose(actual, expected, abs_tol=0.1):
-                    actual_label = "brak" if actual is None or not math.isfinite(actual) else f"{actual:g}"
-                    unconfirmed.append(f"{label}={actual_label} (oczekiwano {expected:g})")
-            if not unconfirmed:
-                return []
-            if mode_unconfirmed and attempt < len(self.control_verification_delays) - 1:
-                try:
-                    await self.async_set_work_mode(mode)
-                except Exception as err:
-                    unconfirmed.append(f"System Work Mode: {err}")
+        if mode is not None:
+            mode_state = self.hass.states.get(self.work_mode_select)
+            if mode_state is None or str(mode_state.state) != mode:
+                actual_mode = "brak" if mode_state is None else str(mode_state.state)
+                unconfirmed.append(f"System Work Mode={actual_mode} (oczekiwano {mode})")
+        for entity_id, (label, expected) in expected_numbers.items():
+            state = self.hass.states.get(entity_id)
+            actual = None if state is None else self.safe_float(state.state, float("nan"))
+            if actual is None or not math.isfinite(actual) or not math.isclose(actual, expected, abs_tol=0.1):
+                actual_label = "brak" if actual is None or not math.isfinite(actual) else f"{actual:g}"
+                unconfirmed.append(f"{label}={actual_label} (oczekiwano {expected:g})")
         return unconfirmed
+
+    def _pending_control_key(self) -> str:
+        """Identify the user-visible target that owns an in-flight write."""
+        return (
+            f"{self.control_mode}:{self.active_slot_key()}"
+            if self.control_mode == "Schedule"
+            else self.control_mode
+        )
+
+    def _clear_pending_control_transaction(self) -> None:
+        self._pending_control_transaction = {}
+        if self.unsub_confirmation_timer:
+            self.unsub_confirmation_timer()
+            self.unsub_confirmation_timer = None
+
+    def _schedule_pending_control_timeout(self) -> None:
+        """Finish delayed confirmation at the promised deadline, not next tick."""
+        if self.unsub_confirmation_timer:
+            self.unsub_confirmation_timer()
+            self.unsub_confirmation_timer = None
+
+        @callback
+        def _on_timeout(_now: datetime) -> None:
+            self.unsub_confirmation_timer = None
+            self.hass.async_create_task(self._async_finish_pending_control_confirmation())
+
+        self.unsub_confirmation_timer = async_track_point_in_time(
+            self.hass,
+            _on_timeout,
+            ha_now() + timedelta(seconds=self.control_confirmation_timeout),
+        )
+
+    async def _async_finish_pending_control_confirmation(self) -> None:
+        """Perform one final serialized read when the confirmation window ends."""
+        async with self._operation_lock:
+            if not self._pending_control_transaction:
+                return
+            await self._async_tick_impl()
+
+    async def _async_confirm_or_wait_for_control(
+        self, expected: dict[str, Any], stage: str, *, started: bool = False
+    ) -> bool | None:
+        """Confirm an in-flight write, or leave it pending without re-writing.
+
+        ``True`` means confirmed, ``False`` means the 90-second confirmation
+        window expired and defaults were restored, and ``None`` means that the
+        caller must perform the first write.
+        """
+        key = self._pending_control_key()
+        pending = self._pending_control_transaction
+        if not started:
+            if not pending:
+                return None
+            if pending.get("key") != key or pending.get("expected") != expected:
+                self._clear_pending_control_transaction()
+                return None
+        unconfirmed = await self.async_verify_control_values(
+            expected.get("System Work Mode"),
+            float(expected.get("Max Sell Power", 0)),
+            float(expected.get("Prąd rozładowania", 0)),
+            float(expected.get("Prąd ładowania baterii", 0)),
+            float(expected.get("Prąd ładowania z sieci", 0)),
+        )
+        if not unconfirmed:
+            self._clear_pending_control_transaction()
+            self.record_schedule_attempt("applied", "potwierdzenie", expected, "Potwierdzono pełny zestaw ustawień slotu")
+            self._clear_slot_failure_latch()
+            self.last_action = f"Applied {self.control_mode}"
+            self.last_error = ""
+            self.mark_settings_applied()
+            self.notify_update()
+            return True
+
+        now = ha_now().timestamp()
+        if started:
+            self._pending_control_transaction = {
+                "key": key,
+                "slot": self.active_slot_key(),
+                "expected": dict(expected),
+                "stage": stage,
+                "started_at": now,
+            }
+            pending = self._pending_control_transaction
+            self._schedule_pending_control_timeout()
+        elapsed = max(0.0, now - float(pending.get("started_at", now)))
+        remaining = max(0, math.ceil(self.control_confirmation_timeout - elapsed))
+        if elapsed < self.control_confirmation_timeout:
+            message = f"Oczekiwanie na potwierdzenie falownika ({remaining} s): {'; '.join(unconfirmed)}"
+            self.record_schedule_attempt("pending", "potwierdzenie falownika", expected, message)
+            self.last_action = "Oczekiwanie na potwierdzenie ustawień przez falownik"
+            self.last_error = ""
+            self.notify_update()
+            return True
+
+        self._clear_pending_control_transaction()
+        reason = f"Niepotwierdzone ustawienia po {int(self.control_confirmation_timeout)} s: {'; '.join(unconfirmed)}"
+        return await self._async_handle_slot_failure(reason, "potwierdzenie falownika", expected)
 
     async def async_apply_safe_defaults(self, reason: str) -> bool:
         """Apply user defaults as the single fail-safe path without forced zeroes."""
@@ -2258,12 +2348,12 @@ class DeyeEnergyManagerRuntime:
                 "discharge_current": float(slot.discharge_current if slot.enabled and not grid_charge else 0),
                 "charge_current": float(slot.charge_current if slot.enabled else 0),
                 "grid_charge_current": grid_charge_current if slot.enabled else 0,
-                "tou_soc": float(slot.tou_soc if slot.enabled else 0),
+                "minimum_sell_soc": float(slot.minimum_sell_soc if slot.enabled else 0),
                 "grid_charge": grid_charge,
             }
-            comparable = {"tou_soc": data["tou_soc"], "grid_charge": data["grid_charge"]}
+            comparable = {"minimum_sell_soc": data["minimum_sell_soc"], "grid_charge": data["grid_charge"]}
             previous = (
-                {"tou_soc": segments[-1]["tou_soc"], "grid_charge": segments[-1]["grid_charge"]}
+                {"minimum_sell_soc": segments[-1]["minimum_sell_soc"], "grid_charge": segments[-1]["grid_charge"]}
                 if segments
                 else None
             )
@@ -2321,7 +2411,7 @@ class DeyeEnergyManagerRuntime:
             return False
 
         signature = "|".join(
-            f"{item['start']}-{item['end']}:{item['mode']}:{item['grid_charge']}:{item['tou_soc']}:{item['charge_current']}:{item['grid_charge_current']}"
+            f"{item['start']}-{item['end']}:{item['mode']}:{item['grid_charge']}:{item['minimum_sell_soc']}:{item['charge_current']}:{item['grid_charge_current']}"
             for item in segments
         )
         if signature == self._last_tou_signature and self._tou_grid_state_matches(segments):
@@ -2343,7 +2433,7 @@ class DeyeEnergyManagerRuntime:
                     continue
                 start_value = f"{int(item['start']):02d}:00"
                 self._validate_time_entity(f"TOU {idx} start", self._tou_entity(idx, "start"), start_value)
-                self._validate_number_entity(f"TOU {idx} SOC", self._tou_entity(idx, "soc"), max(item["tou_soc"], 0))
+                self._validate_number_entity(f"TOU {idx} SOC", self._tou_entity(idx, "soc"), max(item["minimum_sell_soc"], 0))
                 self._validate_switch_entity(f"TOU {idx} Grid Charge", self._tou_entity(idx, "grid"))
                 if item["grid_charge"]:
                     self._validate_number_entity(
@@ -2360,7 +2450,7 @@ class DeyeEnergyManagerRuntime:
                     continue
                 start_value = f"{int(item['start']):02d}:00"
                 await self.async_set_time(self._tou_entity(idx, "start"), start_value)
-                await self.async_set_number(self._tou_entity(idx, "soc"), max(item["tou_soc"], 0))
+                await self.async_set_number(self._tou_entity(idx, "soc"), max(item["minimum_sell_soc"], 0))
                 await self.async_set_switch(self._tou_entity(idx, "grid"), bool(item["grid_charge"]))
                 if item["grid_charge"]:
                     await self.async_set_number(self.grid_charge_current_number, item["grid_charge_current"])
@@ -2394,7 +2484,7 @@ class DeyeEnergyManagerRuntime:
                     await self.async_set_number(self.charge_current_number, slot.charge_current)
                     self.last_action = (
                         f"Ładowanie z sieci {slot.label}: {current:g} A, "
-                        f"SOC TOU {slot.tou_soc:g}%"
+                        f"SOC {slot.minimum_sell_soc:g}%"
                     )
             self.last_error = ""
             self.mark_settings_applied()
@@ -2414,7 +2504,6 @@ class DeyeEnergyManagerRuntime:
             "discharge_current": (0.0, 240.0),
             "charge_current": (0.0, 240.0),
             "grid_charge_current": (0.0, 240.0),
-            "tou_soc": (0.0, 100.0),
             "minimum_sell_soc": (0.0, 100.0),
             "min_sell_price": (0.0, 5.0),
         }
@@ -2423,6 +2512,7 @@ class DeyeEnergyManagerRuntime:
         async with self._operation_lock:
             previous_slots = {key: replace(slot) for key, slot in self.slots.items()}
             previous_scheduler = self.scheduler_enabled
+            self._clear_pending_control_transaction()
             try:
                 for update in updates:
                     update = dict(update) if isinstance(update, dict) else update
@@ -2431,11 +2521,10 @@ class DeyeEnergyManagerRuntime:
                     slot_key = str(update.get("slot_key") or "")
                     if slot_key not in self.slots:
                         raise ValueError(f"Unknown schedule slot: {slot_key}")
+                    if "tou_soc" in update:
+                        update.setdefault("minimum_sell_soc", update.pop("tou_soc"))
                     if "min_soc" in update:
-                        legacy_soc = update.pop("min_soc")
-                        update.setdefault("tou_soc", legacy_soc)
-                        if update.get("mode") == MODE_SELLING_FIRST:
-                            update.setdefault("minimum_sell_soc", legacy_soc)
+                        update.setdefault("minimum_sell_soc", update.pop("min_soc"))
                     unknown = set(update) - allowed_fields - {"slot_key"}
                     if unknown:
                         raise ValueError(f"Unsupported schedule fields: {', '.join(sorted(unknown))}")
@@ -2577,7 +2666,7 @@ class DeyeEnergyManagerRuntime:
         slot_data = (
             slot.key, slot.enabled, slot.mode, slot.sell_power,
             slot.discharge_current, slot.charge_current,
-            slot.grid_charge_current, slot.charge_enabled, slot.tou_soc,
+            slot.grid_charge_current, slot.charge_enabled,
             slot.minimum_sell_soc, slot.min_sell_price,
         )
         return repr((self.control_mode, slot_data, tuple(availability), tuple(sensor_states), self.mapping_error))
@@ -2588,6 +2677,7 @@ class DeyeEnergyManagerRuntime:
     async def _async_handle_slot_failure(
         self, reason: str, stage: str, expected: dict[str, Any]
     ) -> bool:
+        self._clear_pending_control_transaction()
         signature = self._slot_failure_fingerprint(stage)
         if signature == self._last_slot_failure_signature:
             message = f"{reason}. Ustawienia domyślne zostały już zastosowane dla tego samego błędu."
@@ -2641,6 +2731,9 @@ class DeyeEnergyManagerRuntime:
                 else self.default_grid_charge_current
             )
         expected = {"System Work Mode": target_mode, "Max Sell Power": target_sell_power, "Prąd rozładowania": target_discharge_current, "Prąd ładowania baterii": target_charge_current, "Prąd ładowania z sieci": grid_charge_current}
+        pending_result = await self._async_confirm_or_wait_for_control(expected, "potwierdzenie falownika")
+        if pending_result is not None:
+            return pending_result
         stage = "walidacja planu"
         self.record_schedule_attempt("pending", stage, expected)
         try:
@@ -2655,14 +2748,8 @@ class DeyeEnergyManagerRuntime:
             await self.async_set_number(self.grid_charge_current_number, grid_charge_current)
             await self.async_set_number(self.max_sell_power_number, target_sell_power)
             await self.async_set_number(self.discharge_current_number, target_discharge_current)
-            unconfirmed = await self.async_verify_control_values(None, target_sell_power, target_discharge_current, target_charge_current, grid_charge_current)
-            if unconfirmed:
-                raise RuntimeError(f"Niepotwierdzone wartości: {'; '.join(unconfirmed)}")
             stage = "tryb pracy"
             await self.async_set_work_mode(target_mode)
-            unconfirmed = await self.async_verify_control_values(target_mode, target_sell_power, target_discharge_current, target_charge_current, grid_charge_current)
-            if unconfirmed:
-                raise RuntimeError(f"Niepotwierdzone wartości końcowe: {'; '.join(unconfirmed)}")
         except Exception as err:
             message = f"Nieudana transakcja sterująca ({stage}): {err}"
             if self.control_mode == "Schedule" and self.active_slot.enabled:
@@ -2670,13 +2757,7 @@ class DeyeEnergyManagerRuntime:
             self.record_schedule_attempt("failed", stage, expected, message)
             await self.async_apply_safe_defaults(message)
             return False
-        self.record_schedule_attempt("applied", stage, expected, "Potwierdzono pełny zestaw ustawień slotu")
-        self._clear_slot_failure_latch()
-        self.last_action = f"Applied {self.control_mode}"
-        self.last_error = ""
-        self.mark_settings_applied()
-        self.notify_update()
-        return True
+        return bool(await self._async_confirm_or_wait_for_control(expected, stage, started=True))
 
     async def async_apply_default_values(self, reason: str = "Defaults applied") -> None:
         self._validate_control_plan(
@@ -2731,11 +2812,13 @@ class DeyeEnergyManagerRuntime:
 
     async def async_request_stop(self) -> None:
         async with self._operation_lock:
+            self._clear_pending_control_transaction()
             self.control_mode = "Stop Sell"
             await self.async_apply_safe_defaults("Sprzedaż zatrzymana")
 
     async def async_restore_defaults(self) -> None:
         async with self._operation_lock:
+            self._clear_pending_control_transaction()
             applied = await self.async_apply_safe_defaults(
                 "Ręczne zastosowanie ustawień domyślnych"
             )
@@ -2756,6 +2839,7 @@ class DeyeEnergyManagerRuntime:
     async def async_resume_manager(self) -> None:
         """Consciously re-enable Schedule after Stop Sell or an emergency stop."""
         async with self._operation_lock:
+            self._clear_pending_control_transaction()
             self.emergency_stop = False
             self.control_mode = "Schedule"
             self.scheduler_enabled = True
@@ -2770,6 +2854,7 @@ class DeyeEnergyManagerRuntime:
 
     async def async_emergency_stop(self) -> None:
         async with self._operation_lock:
+            self._clear_pending_control_transaction()
             self.emergency_stop = True
             self.control_mode = "Stop Sell"
             await self.async_apply_safe_defaults("Zatrzymanie awaryjne")
@@ -2840,6 +2925,7 @@ class DeyeEnergyManagerRuntime:
             self.hass.async_create_task(self.async_refresh_tariff_catalog())
 
     async def async_unload(self) -> None:
+        self._clear_pending_control_transaction()
         if self.unsub_timer:
             self.unsub_timer()
             self.unsub_timer = None
