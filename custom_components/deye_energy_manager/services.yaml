@@ -75,7 +75,7 @@ restore_defaults:
   description: Ręcznie zastosuj ustawienia zapisane przez użytkownika w oknie Ustawienia domyślne.
 resume_manager:
   name: Włącz Manager i harmonogram
-  description: "Świadomie włącza tryb Schedule i Scheduler po Stop Sell lub zatrzymaniu awaryjnym. Nie zmienia wspólnego profilu Charge; tylko Ładowanie z sieci: TAK w tym profilu zezwala na fizyczne Grid Charge."
+  description: "Świadomie włącza tryb Schedule i Scheduler po Stop Sell lub zatrzymaniu awaryjnym. Nie zmienia szablonu ani istniejących slotów Charge; tylko Ładowanie z sieci: TAK w konkretnym slocie Charge zezwala na fizyczne Grid Charge."
 emergency_stop:
   name: Emergency stop
   description: Natychmiast zatrzaśnij sterowanie managera i zastosuj 1:1 pełny zestaw ustawień domyślnych użytkownika, włącznie z wybranym trybem.
@@ -117,11 +117,11 @@ save_tariff_settings:
           multiline: true
 save_charge_profile:
   name: Zapisz ustawienia ładowania
-  description: Zapisuje pełny profil używany wyłącznie przez sloty harmonogramu w trybie Charge.
+  description: Zapisuje szablon kopiowany przy późniejszym wyborze trybu Charge. Nie nadpisuje istniejących slotów harmonogramu.
   fields:
     grid_charge_enabled:
       required: true
-      description: "Ładowanie z sieci: TAK zezwala wspólnemu profilowi Charge włączyć Grid Charge w fizycznym TOU Deye; NIE zawsze pozostawia je wyłączone. Dodatni prąd nie jest zgodą na ładowanie z sieci."
+      description: "Wartość początkowa kopiowana do nowego slotu Charge. Po skopiowaniu tylko Ładowanie z sieci: TAK zapisane w konkretnym slocie zezwala na fizyczne Grid Charge; dodatni prąd nie jest zgodą."
       selector:
         boolean:
     charge_current:

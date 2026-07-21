@@ -18,7 +18,9 @@
 - Dla zapisu aktywnego slotu dodano nasłuchiwanie zmian encji Deye oraz szybkie odczyty kontrolne po 1, 2 i 4 sekundach, z limitem oczekiwania 90 sekund. W tym czasie transakcja nie jest ponawiana, ustawienia domyślne nie są przedwcześnie przywracane, a diagnostyka pokazuje etap oraz wartości oczekiwane i odczytane.
 - Dodano walidację fizycznych encji Deye Time Of Use oraz świadomy przycisk/usługę `resume_manager` („Włącz Manager i harmonogram”). Włącza `Schedule` i Scheduler, lecz nie zmienia flagi `Grid` w żadnym slocie.
 - Pole **Ładowanie z sieci** jest jedyną zgodą na Deye Grid Charge: wartość `nie` zawsze zapisuje wyłączony Grid Charge, także w trybie `Charge`; `charge_current` pozostaje limitem całkowitego ładowania baterii, a `grid_charge_current` limitem ładowania z sieci.
-- Dodano osobny profil **Ustawienia ładowania** dla aktywnych slotów `Charge`: prąd ładowania, prąd rozładowania, prąd ładowania z sieci oraz docelowy SOC. **Minimalny SOC sprzedaży** pozostaje warunkiem tylko dla `Selling First`; do fizycznego SOC zakresu TOU dla Charge trafia wyłącznie docelowy SOC profilu.
+- **Ustawienia ładowania** działają jako szablon kopiowany przy wyborze trybu `Charge`. Każdy slot zachowuje późniejsze ręczne zmiany prądów, docelowego SOC oraz zgody na ładowanie z sieci; ponowny zapis szablonu nie nadpisuje istniejących slotów.
+- Okno slotu pokazuje jedno kontekstowe pole SOC: minimalny SOC sprzedaży dla `Selling First`, fizyczny SOC Deye TOU dla Zero Export lub docelowy SOC dla `Charge`. Znaczenia logiczne i fizyczne pozostają rozdzielone w backendzie.
+- Przywrócono bezpośrednią edycję sześciu fizycznych zakresów w zakładce **Deye Time Of Use** z ostrzeżeniem, że mapowanie harmonogramu może je później nadpisać.
 - Usunięto aktywny przełącznik `charge_scheduler_enabled` z logiki sterowania. Parametry falownika wynikają z aktywnego slotu.
 - Po błędzie tego samego aktywnego slotu ustawienia domyślne są stosowane tylko raz; kolejna próba wymaga zmiany encji, harmonogramu, slotu albo świadomego wznowienia Managera.
 
@@ -26,7 +28,7 @@
 
 - Dodano usługę `apply_schedule_patch` do atomowych operacji zbiorczych.
 - Edycja zbiorcza i zastosowanie sugestii korzystają z jednej operacji backendowej.
-- Tryb `Charge` nie jest zgodą na Grid Charge; jedyną zgodę określa pole **Ładowanie z sieci** we wspólnym profilu Charge.
+- Tryb `Charge` nie jest zgodą na Grid Charge; jedyną zgodę określa pole **Ładowanie z sieci** zapisane w konkretnym slocie. Profil Charge jest tylko szablonem wartości początkowych.
 - Nieudana aktualizacja przywraca logiczną konfigurację slotów.
 
 ### Dane i konfiguracja
@@ -49,10 +51,10 @@
 ### Karta i UX
 
 - Pole statusu karty tłumaczy `SELL BLOCKED` jako **Sprzedaż zatrzymana**; pełna przyczyna pozostaje widoczna jako decyzja managera.
-- Rozdzielono `minimum_sell_soc` od fizycznego `tou_soc`: minimalny SOC jest wyłącznie warunkiem `Selling First`, a do Deye TOU trafia niezależny SOC slotu albo docelowy SOC wspólnego profilu Charge.
+- Rozdzielono `minimum_sell_soc` od fizycznego `tou_soc`: minimalny SOC jest wyłącznie warunkiem `Selling First`, a do Deye TOU trafia niezależny SOC zapisany w konkretnym slocie, w tym docelowy SOC slotu `Charge`.
 - Migracja nie zastępuje brakującego fizycznego `tou_soc` minimalnym SOC sprzedaży ani `0`; wymagające potwierdzenia sloty blokują zapis mapowania przed pierwszą zmianą w Deye.
-- Edytor fizycznego Deye Time Of Use jest wyłącznie diagnostyczny; jedyną ścieżką zapisu pozostaje serializowana transakcja Harmonogramu sprzedaży.
-- Obie dystrybuowane kopie karty mają identyczną zawartość i rewizję zasobu `v=0772`.
+- Przywrócono świadomą, bezpośrednią edycję fizycznego Deye Time Of Use. Karta ostrzega, że późniejsze zastosowanie mapowania Harmonogramu sprzedaży może nadpisać te wartości.
+- Obie dystrybuowane kopie karty mają identyczną zawartość i rewizję zasobu `v=0773`.
 - Poprawiono zabezpieczanie dynamicznych wartości HTML.
 - Usunięto błędnie wyświetlane encje numeryczne HTML, m.in. w nazwie strategii „Zrównoważony”.
 - Dodano zakładkę `Taryfa i dystrybucja` z wyborem operatora, taryfy i trybu katalogu, jawnym przyciskiem zapisu, diagnostyką aktualizacji oraz profilem 48h dla dziś i jutra.

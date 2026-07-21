@@ -126,21 +126,20 @@ class FrontendDefaultRestoreTests(unittest.TestCase):
     def test_documentation_uses_current_card_cache_revision(self):
         for name in ("README.md", "INSTALL_PL.md"):
             source = (ROOT / name).read_text(encoding="utf-8")
-            self.assertIn("deye-energy-manager-card.js?v=0772", source)
-            self.assertNotIn(f"deye-energy-manager-card.js?v={770 + 1}", source)
+            self.assertIn("deye-energy-manager-card.js?v=0773", source)
+            self.assertNotIn("deye-energy-manager-card.js?v=0772", source)
             self.assertNotIn("deye-energy-manager-card.js?v=0765", source)
 
-    def test_card_has_no_direct_edit_path_for_physical_tou_entities(self):
+    def test_card_has_explicit_direct_edit_path_for_physical_tou_entities(self):
         source = self.sources[0]
-        self.assertNotIn("data-open-tou", source)
+        self.assertIn("data-open-tou", source)
         tou_dialog = extract_method(source, "renderDialog(slots, touStarts)")
-        for forbidden in (
+        for required in (
             "this.timeInput(tou.",
             "this.numberInput(tou.",
             "this.pill(tou.grid)",
-            "data-slot-grid-charge",
         ):
-            self.assertNotIn(forbidden, tou_dialog)
+            self.assertIn(required, tou_dialog)
 
     def test_unconfirmed_logical_tou_soc_never_renders_as_zero(self):
         source = self.sources[0]
@@ -177,13 +176,14 @@ class FrontendDefaultRestoreTests(unittest.TestCase):
         method = extract_method(self.sources[0], "chargeProfileInput(name, entityId, unit = \"\")")
         for required in (
             "this._chargeProfileDraft",
-            '["unknown", "unavailable"]',
+            '["unknown", "unavailable", ""]',
             "entity?.attributes?.min",
             "entity?.attributes?.max",
             "entity?.attributes?.step",
             'type="number"',
             'data-charge-profile-number=',
-            'range ? "" : "disabled"',
+            "fallback.min",
+            "fallback.max",
         ):
             self.assertIn(required, method)
         for forbidden in ("?? 0", "|| 0", 'value="0"'):
@@ -221,24 +221,22 @@ class FrontendDefaultRestoreTests(unittest.TestCase):
         self.assertIn('"save_charge_profile"', charge_method)
         self.assertNotIn('"save_default_settings"', charge_method)
 
-    def test_charge_slot_is_read_only_and_table_uses_shared_profile(self):
+    def test_charge_slot_is_editable_and_profile_is_only_a_template(self):
         source = self.sources[0]
         dialog = extract_method(source, "renderDialog(slots, touStarts)")
         charge_start = dialog.index("const slotFields = isCharge ?")
         non_charge_start = dialog.index(": `", charge_start)
         charge_block = dialog[charge_start:non_charge_start]
-        for forbidden in ("numberInput(", "data-slot-grid-charge", "data-toggle="):
-            self.assertNotIn(forbidden, charge_block)
         for required in (
-            "profile.chargeCurrent",
-            "profile.dischargeCurrent",
-            "profile.gridChargeCurrent",
-            "profile.targetSoc",
-            "isCharge ? chargeProfile.chargeCurrent",
-            "isCharge ? chargeProfile.gridChargeCurrent",
-            "isCharge ? chargeProfile.targetSoc",
+            "numberInput(entities.chargeCurrent",
+            "numberInput(entities.dischargeCurrent",
+            "numberInput(entities.gridChargeCurrent",
+            "touSocInput(entities.touSoc)",
+            "pill(entities.chargeEnabled)",
+            "Wartości początkowe skopiowano",
         ):
-            self.assertIn(required, source)
+            self.assertIn(required, charge_block)
+        self.assertIn("pill(entities.chargeEnabled)", dialog)
 
     def test_settings_dialog_scrolls_on_desktop_tablet_and_phone(self):
         source = self.sources[0]

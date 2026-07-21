@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from .const import DOMAIN, SLOTS
+from .const import DOMAIN, MODE_CHARGE, SLOTS
 from .entity import DeyeEnergyManagerEntity
 
 
@@ -94,6 +94,35 @@ class DeyeSlotSwitch(DeyeEnergyManagerEntity, SwitchEntity, RestoreEntity):
         await self.runtime.async_tick()
 
 
+class DeyeSlotGridChargeSwitch(DeyeEnergyManagerEntity, SwitchEntity, RestoreEntity):
+    """Explicit per-slot permission for Deye TOU Grid Charge."""
+
+    def __init__(self, runtime, slot_key, label):
+        super().__init__(runtime, f"slot_{slot_key}_charge_enabled", f"Charge {label}")
+        self.slot_key = slot_key
+
+    @property
+    def is_on(self):
+        slot = self.runtime.slots[self.slot_key]
+        return bool(slot.mode == MODE_CHARGE and slot.charge_enabled)
+
+    async def async_added_to_hass(self):
+        if (last_state := await self.async_get_last_state()) is not None:
+            slot = self.runtime.slots[self.slot_key]
+            slot.charge_enabled = last_state.state == "on" and slot.mode == MODE_CHARGE
+
+    async def async_turn_on(self, **kwargs: Any):
+        slot = self.runtime.slots[self.slot_key]
+        if slot.mode != MODE_CHARGE:
+            raise ValueError("Ładowanie z sieci można włączyć tylko dla slotu Charge")
+        slot.charge_enabled = True
+        await self.runtime.async_apply_slot_grid_charge(self.slot_key)
+
+    async def async_turn_off(self, **kwargs: Any):
+        self.runtime.slots[self.slot_key].charge_enabled = False
+        await self.runtime.async_apply_slot_grid_charge(self.slot_key)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback):
     runtime = hass.data[DOMAIN][entry.entry_id]
     entities = [
@@ -105,4 +134,5 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     ]
     for key, label, *_ in SLOTS:
         entities.append(DeyeSlotSwitch(runtime, key, label))
+        entities.append(DeyeSlotGridChargeSwitch(runtime, key, label))
     async_add_entities(entities)

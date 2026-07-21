@@ -606,8 +606,13 @@ class GridAndSlotSafetyTests(unittest.TestCase):
         slot.enabled = True
         slot.mode = const.MODE_CHARGE
         runtime.charge_profile_grid_enabled = grid
-        slot.charge_current = 5
-        slot.grid_charge_current = 5
+        # This represents a slot immediately after selecting Charge: the
+        # profile has been copied once and the slot is now authoritative.
+        slot.charge_enabled = grid
+        slot.charge_current = 120
+        slot.discharge_current = 120
+        slot.grid_charge_current = 60
+        slot.tou_soc = 90
         slot.minimum_sell_soc = 90
         return slot
 
@@ -678,18 +683,24 @@ class GridAndSlotSafetyTests(unittest.TestCase):
         runtime = make_runtime()
         slot = self.configure_charge_slot(runtime, grid=False)
         slot.minimum_sell_soc = 20
-        runtime.charge_profile_target_soc = 85
+        slot.tou_soc = 85
+        runtime.charge_profile_target_soc = 70
         segments = runtime._compress_schedule_segments()
         self.assertIn(85, [segment["tou_soc"] for segment in segments])
         self.assertEqual(slot.minimum_sell_soc, 20)
 
-    def test_charge_profile_keeps_default_ct_topology_and_uses_profile_values(self):
+    def test_charge_slot_keeps_default_ct_topology_and_uses_slot_values(self):
         runtime = make_runtime(default_mode=const.MODE_ZERO_EXPORT_CT)
-        self.configure_charge_slot(runtime, grid=False)
+        slot = self.configure_charge_slot(runtime, grid=False)
+        slot.charge_current = 95
+        slot.discharge_current = 35
+        slot.grid_charge_current = 55
+        slot.tou_soc = 88
+        # Later changes of the template must not overwrite the slot.
         runtime.charge_profile_charge_current = 95
-        runtime.charge_profile_discharge_current = 35
-        runtime.charge_profile_grid_charge_current = 55
-        runtime.charge_profile_target_soc = 88
+        runtime.charge_profile_discharge_current = 25
+        runtime.charge_profile_grid_charge_current = 45
+        runtime.charge_profile_target_soc = 78
 
         self.assertTrue(asyncio.run(runtime.async_apply_targets()))
         self.assertEqual(runtime.hass.states.get(const.DEFAULT_WORK_MODE_SELECT).state, const.MODE_ZERO_EXPORT_CT)
@@ -701,9 +712,11 @@ class GridAndSlotSafetyTests(unittest.TestCase):
         ]
         self.assertIn("88.0", tou_soc_values)
 
-    def test_save_charge_profile_updates_all_values_before_schedule_tick(self):
+    def test_save_charge_profile_only_updates_the_template(self):
         runtime = make_runtime()
-        self.configure_charge_slot(runtime, grid=True)
+        slot = self.configure_charge_slot(runtime, grid=True)
+        before_slot = dict(vars(slot))
+        calls_before = list(runtime.hass.services.calls)
         asyncio.run(runtime.async_save_charge_profile({
             "charge_current": 120,
             "discharge_current": 30,
@@ -716,7 +729,9 @@ class GridAndSlotSafetyTests(unittest.TestCase):
         self.assertEqual(runtime.charge_profile_discharge_current, 30)
         self.assertEqual(runtime.charge_profile_grid_charge_current, 40)
         self.assertEqual(runtime.charge_profile_target_soc, 85)
-        self.assertEqual(runtime.hass.states.get(const.DEFAULT_CHARGE_CURRENT).state, "120.0")
+        self.assertTrue(runtime.charge_profile_grid_enabled)
+        self.assertEqual(vars(slot), before_slot)
+        self.assertEqual(runtime.hass.services.calls, calls_before)
 
     def test_save_charge_profile_while_stopped_persists_without_deye_calls(self):
         runtime = make_runtime()
@@ -736,7 +751,7 @@ class GridAndSlotSafetyTests(unittest.TestCase):
         self.assertEqual(runtime.charge_profile_charge_current, 120)
         self.assertEqual(
             runtime.last_action,
-            "Profil zapisany. Zostanie zastosowany po wznowieniu Managera.",
+            "Zapisano szablon ustawień ładowania",
         )
 
     def test_charge_profile_does_not_mutate_non_charge_slot_settings(self):
@@ -771,7 +786,39 @@ class GridAndSlotSafetyTests(unittest.TestCase):
         for slot, before in protected:
             self.assertEqual(vars(slot), before)
 
-    def test_shared_profile_is_effective_for_every_charge_slot(self):
+    def test_selecting_charge_copies_template_once_and_keeps_manual_override(self):
+        runtime = make_runtime()
+        runtime.charge_profile_charge_current = 101
+        runtime.charge_profile_discharge_current = 31
+        runtime.charge_profile_grid_charge_current = 41
+        runtime.charge_profile_target_soc = 81
+        runtime.charge_profile_grid_enabled = True
+        slot_key = runtime.active_slot_key()
+        slot = runtime.slots[slot_key]
+        slot.mode = const.MODE_ZERO_EXPORT
+
+        runtime.set_work_mode_for_slot(slot_key, const.MODE_CHARGE)
+        self.assertEqual(slot.charge_current, 101)
+        self.assertEqual(slot.discharge_current, 31)
+        self.assertEqual(slot.grid_charge_current, 41)
+        self.assertEqual(slot.tou_soc, 81)
+        self.assertTrue(slot.charge_enabled)
+
+        slot.charge_current = 77
+        slot.tou_soc = 66
+        asyncio.run(runtime.async_save_charge_profile({
+            "charge_current": 120,
+            "discharge_current": 40,
+            "grid_charge_current": 50,
+            "target_soc": 90,
+            "grid_charge_enabled": False,
+        }))
+        runtime.set_work_mode_for_slot(slot_key, const.MODE_CHARGE)
+        self.assertEqual(slot.charge_current, 77)
+        self.assertEqual(slot.tou_soc, 66)
+        self.assertTrue(slot.charge_enabled)
+
+    def test_existing_charge_slots_keep_independent_manual_values(self):
         runtime = make_runtime()
         runtime.charge_profile_charge_current = 105
         runtime.charge_profile_discharge_current = 35
@@ -779,25 +826,27 @@ class GridAndSlotSafetyTests(unittest.TestCase):
         runtime.charge_profile_target_soc = 82
         runtime.charge_profile_grid_enabled = True
         charge_slots = list(runtime.slots.values())[:2]
-        for slot in charge_slots:
+        for index, slot in enumerate(charge_slots):
             slot.enabled = True
             slot.mode = const.MODE_CHARGE
-            slot.charge_current = 5
-            slot.discharge_current = 6
-            slot.grid_charge_current = 7
-            slot.tou_soc = 8
+            slot.charge_enabled = index == 0
+            slot.charge_current = 5 + index
+            slot.discharge_current = 6 + index
+            slot.grid_charge_current = 7 + index
+            slot.tou_soc = 8 + index
 
-        physical = [
-            segment for segment in runtime._compress_schedule_segments()
-            if segment["grid_charge"]
-        ]
-        self.assertTrue(physical)
-        for segment in physical:
-            self.assertEqual(segment["mode"], const.MODE_CHARGE)
-            self.assertEqual(segment["charge_current"], 105)
-            self.assertEqual(segment["discharge_current"], 35)
-            self.assertEqual(segment["grid_charge_current"], 45)
-            self.assertEqual(segment["tou_soc"], 82)
+        segments = runtime._compress_schedule_segments()
+        self.assertEqual(segments[0]["mode"], const.MODE_CHARGE)
+        self.assertTrue(segments[0]["grid_charge"])
+        self.assertEqual(segments[0]["charge_current"], 5)
+        self.assertEqual(segments[0]["discharge_current"], 6)
+        self.assertEqual(segments[0]["grid_charge_current"], 7)
+        self.assertEqual(segments[0]["tou_soc"], 8)
+        self.assertEqual(segments[1]["mode"], const.MODE_CHARGE)
+        self.assertFalse(segments[1]["grid_charge"])
+        self.assertEqual(segments[1]["charge_current"], 6)
+        self.assertEqual(segments[1]["discharge_current"], 7)
+        self.assertEqual(segments[1]["tou_soc"], 9)
 
     def test_grid_charge_yes_is_limited_to_charge_ranges(self):
         runtime = make_runtime()
@@ -806,6 +855,9 @@ class GridAndSlotSafetyTests(unittest.TestCase):
         charge_slot = list(runtime.slots.values())[5]
         charge_slot.enabled = True
         charge_slot.mode = const.MODE_CHARGE
+        charge_slot.charge_enabled = True
+        charge_slot.grid_charge_current = 40
+        charge_slot.tou_soc = 80
 
         segments = runtime._compress_schedule_segments()
         self.assertTrue(any(segment["grid_charge"] for segment in segments))
@@ -931,24 +983,26 @@ class TouSocMappingTests(unittest.TestCase):
         slot.tou_soc = 15
         self._map_active_slot(runtime, 15, False)
 
-    def test_charge_profile_target_soc_wins_over_slot_tou_soc_with_grid_enabled(self):
+    def test_charge_slot_target_soc_and_grid_enabled_are_mapped(self):
         runtime = make_runtime()
         slot = runtime.slots[runtime.active_slot_key()]
         slot.enabled = True
         slot.mode = const.MODE_CHARGE
-        slot.tou_soc = 10
+        slot.tou_soc = 80
+        slot.charge_enabled = True
         runtime.charge_profile_target_soc = 80
-        runtime.charge_profile_grid_enabled = True
+        runtime.charge_profile_grid_enabled = False
         self._map_active_slot(runtime, 80, True)
 
-    def test_charge_profile_target_soc_wins_over_slot_tou_soc_with_grid_disabled(self):
+    def test_charge_slot_target_soc_and_grid_disabled_are_mapped(self):
         runtime = make_runtime()
         slot = runtime.slots[runtime.active_slot_key()]
         slot.enabled = True
         slot.mode = const.MODE_CHARGE
-        slot.tou_soc = 10
+        slot.tou_soc = 70
+        slot.charge_enabled = False
         runtime.charge_profile_target_soc = 70
-        runtime.charge_profile_grid_enabled = False
+        runtime.charge_profile_grid_enabled = True
         self._map_active_slot(runtime, 70, False)
 
     def test_disabled_slot_keeps_its_tou_soc_instead_of_zero(self):
@@ -978,6 +1032,19 @@ class TouSocMappingTests(unittest.TestCase):
     def test_unconfirmed_tou_soc_blocks_physical_write_without_substitution(self):
         runtime = make_runtime()
         slot = runtime.slots[runtime.active_slot_key()]
+        slot.tou_soc = None
+        calls_before = list(runtime.hass.services.calls)
+
+        self.assertFalse(asyncio.run(runtime.async_apply_time_of_use_map()))
+        self.assertIn("wymaga potwierdzenia", runtime.last_error)
+        self.assertEqual(runtime.hass.services.calls, calls_before)
+
+    def test_unconfirmed_charge_tou_soc_also_blocks_physical_write(self):
+        runtime = make_runtime()
+        slot = runtime.slots[runtime.active_slot_key()]
+        slot.enabled = True
+        slot.mode = const.MODE_CHARGE
+        slot.charge_enabled = True
         slot.tou_soc = None
         calls_before = list(runtime.hass.services.calls)
 
