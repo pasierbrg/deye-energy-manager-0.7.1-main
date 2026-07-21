@@ -5,6 +5,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
     this._pendingRender = false;
     this._dialog = null;
     this._chargeProfileDraft = {};
+    this._chargeProfileGridDraft = null;
     this._defaultSettingsDraft = {};
     this._scrollTops = {};
     this._pageScrollTops = [];
@@ -902,6 +903,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
   }
 
   chargeProfileGridEnabled() {
+    if (typeof this._chargeProfileGridDraft === "boolean") return this._chargeProfileGridDraft;
     return this.displayState(this.entity("switch", "charge_profile_grid_enabled"), "off") === "on";
   }
 
@@ -1040,6 +1042,18 @@ class DeyeEnergyManagerCard extends HTMLElement {
   }
 
   async saveChargeProfile() {
+    const helpers = {
+      charge_current: this.entity("number", "charge_profile_charge_current"),
+      discharge_current: this.entity("number", "charge_profile_discharge_current"),
+      grid_charge_current: this.entity("number", "charge_profile_grid_charge_current"),
+      target_soc: this.entity("number", "charge_profile_target_soc"),
+      grid_charge_enabled: this.entity("switch", "charge_profile_grid_enabled"),
+    };
+    const missing = Object.values(helpers).filter((entityId) => !this.exists(entityId));
+    if (missing.length) {
+      this.failSave("charge_profile", new Error(`Brak encji profilu ładowania: ${missing.join(", ")}`));
+      return false;
+    }
     const fields = [...this.querySelectorAll("[data-charge-profile-number]")];
     const values = {};
     for (const field of fields) {
@@ -1050,12 +1064,23 @@ class DeyeEnergyManagerCard extends HTMLElement {
       }
       values[field.dataset.chargeProfileNumber] = value;
     }
-    values.grid_charge_enabled = this.rawValue("charge-profile-grid", "off") === "on";
+    values.grid_charge_enabled = typeof this._chargeProfileGridDraft === "boolean"
+      ? this._chargeProfileGridDraft
+      : this.rawValue("charge-profile-grid", "off") === "on";
     this.beginSave();
     try {
       await this.callService("deye_energy_manager", "save_charge_profile", values);
+      Object.entries(values).forEach(([key, value]) => {
+        const entityId = helpers[key];
+        this._optimisticStates[entityId] = key === "grid_charge_enabled"
+          ? (value ? "on" : "off")
+          : String(value);
+      });
       this._chargeProfileDraft = {};
+      this._chargeProfileGridDraft = null;
       this.finishSave();
+      this.captureScrollPositions();
+      this.render();
       return true;
     } catch (error) {
       this.failSave("charge_profile", error);
@@ -3292,23 +3317,25 @@ class DeyeEnergyManagerCard extends HTMLElement {
     if (!slot) return "";
     const [key, label] = slot;
     const entities = this.slotEntities(key, label);
-    const isCharge = this.state(entities.mode, "Zero Export To Load") === "Charge";
     const mode = this.state(entities.mode, "Zero Export To Load");
+    const isCharge = mode === "Charge";
     const isSelling = mode === "Selling First";
-    const isOff = mode === "Wyłączone";
-    const slotFields = isCharge ? `
-          <div class="hint">Wartości początkowe skopiowano z Ustawień ładowania przy wyborze Charge. Możesz je teraz zmienić tylko dla tej godziny.</div>
-          ${this.row("Ładowanie z sieci", this.pill(entities.chargeEnabled))}
-          ${this.row("Prąd ładowania baterii", this.numberInput(entities.chargeCurrent, "A"))}
-          ${this.row("Prąd rozładowania", this.numberInput(entities.dischargeCurrent, "A"))}
-          ${this.row("Prąd ładowania z sieci", this.numberInput(entities.gridChargeCurrent, "A"))}
-          ${this.row("Docelowy SOC", this.touSocInput(entities.touSoc))}`
-      : isOff ? "" : `
+    const physicalSocLabel = isCharge ? "Docelowy SOC" : "SOC baterii Deye (TOU)";
+    const gridControl = isCharge
+      ? this.pill(entities.chargeEnabled)
+      : `${this.pill(null, "NIE")}<small> dostępne tylko dla Charge</small>`;
+    const socField = isSelling
+      ? this.row("Minimalny SOC sprzedaży", this.numberInput(entities.minimumSellSoc, "%"))
+      : this.row(physicalSocLabel, this.touSocInput(entities.touSoc));
+    const slotFields = `
+          ${isCharge ? '<div class="hint">Wartości początkowe skopiowano z Ustawień ładowania przy wyborze Charge. Późniejsze ręczne zmiany dotyczą wyłącznie tej godziny.</div>' : ""}
           ${this.row("Moc sprzedaży", this.numberInput(entities.sellPower, "W"))}
           ${this.row("Prąd rozładowania", this.numberInput(entities.dischargeCurrent, "A"))}
           ${this.row("Prąd ładowania baterii", this.numberInput(entities.chargeCurrent, "A"))}
-          ${isSelling ? this.row("Minimalny SOC sprzedaży", this.numberInput(entities.minimumSellSoc, "%")) : this.row("SOC baterii Deye (TOU)", this.touSocInput(entities.touSoc))}
-          ${isSelling ? this.row("Sprzedawaj od ceny", this.numberInput(entities.minSellPrice, "PLN")) : ""}`;
+          ${this.row("Ładowanie z sieci", gridControl)}
+          ${this.row("Prąd ładowania z sieci", this.numberInput(entities.gridChargeCurrent, "A"))}
+          ${socField}
+          ${this.row("Sprzedawaj od ceny", this.numberInput(entities.minSellPrice, "PLN"))}`;
     return `<div class="overlay" data-close-dialog="1">
       <section class="dialog" data-dialog-box="1">
         <div class="dialog-head"><strong>Godzina ${label}</strong><button type="button" data-close-dialog="1">${this.iconSvg("close")}</button></div>
@@ -3374,10 +3401,9 @@ class DeyeEnergyManagerCard extends HTMLElement {
       const entities = this.slotEntities(key, label);
       const enabled = this.displayState(entities.sellEnabled) === "on";
       const mode = this.state(entities.mode, "Zero Export To Load");
-      const isCharge = enabled && mode === "Charge";
-      const gridCharge = isCharge && this.displayState(entities.chargeEnabled, "off") === "on";
+      const gridCharge = this.displayState(entities.chargeEnabled, "off") === "on";
       const chargeCurrent = this.numberState(entities.chargeCurrent);
-      const gridChargeCurrent = isCharge ? this.numberState(entities.gridChargeCurrent) : "-";
+      const gridChargeCurrent = this.numberState(entities.gridChargeCurrent);
       const touSoc = mode === "Selling First" ? this.numberState(entities.minimumSellSoc) : this.numberState(entities.touSoc, "wymaga potwierdzenia");
       const selected = this._selectedSlots?.has(key);
       const meta = this.modeMeta(mode, enabled);
@@ -3393,8 +3419,8 @@ class DeyeEnergyManagerCard extends HTMLElement {
         <td data-label="Moc sprzedaży" class="metric sell">${enabled ? `${this.iconSvg("sell")} ${this.numberState(entities.sellPower)} W` : "-"}</td>
         <td data-label="Prąd rozładowania" class="metric discharge">${enabled ? `↓ ${this.numberState(entities.dischargeCurrent)} A` : "-"}</td>
         <td data-label="Prąd ładowania" class="metric charge">${enabled ? `↑ ${chargeCurrent} A` : "-"}</td>
-        <td data-label="Ładowanie z sieci" class="metric grid">${enabled ? (isCharge ? this.pill(null, gridCharge ? "TAK" : "NIE") : "nie dotyczy") : "-"}</td>
-        <td data-label="Prąd z sieci" class="metric grid-current">${enabled ? (isCharge && gridCharge ? `⚡ ${gridChargeCurrent} A` : "-") : "-"}</td>
+        <td data-label="Ładowanie z sieci" class="metric grid">${enabled ? this.pill(null, gridCharge ? "TAK" : "NIE") : "-"}</td>
+        <td data-label="Prąd ładowania z sieci" class="metric grid-current">${enabled ? `⚡ ${gridChargeCurrent} A` : "-"}</td>
         <td data-label="SOC" class="metric soc">${enabled ? `◇ ${touSoc}%` : "-"}</td>
         <td data-label="Cena min." class="metric price-limit">${enabled ? `${this.formatPrice(this.numberState(entities.minSellPrice))} PLN` : "-"}</td>
         <td data-label="Aktywne">${this.pill(entities.sellEnabled, enabled ? "ON" : "OFF")}</td>
@@ -3575,7 +3601,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
                       <col class="col-current"><col class="col-current"><col class="col-grid"><col class="col-grid-current">
                       <col class="col-soc"><col class="col-price"><col class="col-active"><col class="col-action">
                     </colgroup>
-                    <thead><tr><th class="check-col"></th><th class="time-col">Godz.</th><th>Tryb</th><th>Moc</th><th>Rozł.</th><th>Ład.</th><th>Ładowanie z sieci</th><th>Prąd ładowania z sieci</th><th>SOC Deye</th><th>Cena min.</th><th>Aktywne</th><th>Akcja</th></tr></thead>
+                    <thead><tr><th class="check-col"></th><th class="time-col">Godz.</th><th>Tryb</th><th>Moc</th><th>Rozł.</th><th>Ład.</th><th>Ładowanie z sieci</th><th>Prąd ładowania z sieci</th><th>SOC</th><th>Cena min.</th><th>Aktywne</th><th>Akcja</th></tr></thead>
                     <tbody>${scheduleRows}</tbody>
                   </table>
                   <div class="schedule-foot">
@@ -3737,6 +3763,9 @@ class DeyeEnergyManagerCard extends HTMLElement {
       const saveDraft = () => { this._chargeProfileDraft[el.dataset.chargeProfileNumber] = el.value; };
       el.addEventListener("input", saveDraft);
       el.addEventListener("change", saveDraft);
+    });
+    this.querySelectorAll('[data-raw="charge-profile-grid"]').forEach((el) => {
+      el.addEventListener("change", () => { this._chargeProfileGridDraft = el.value === "on"; });
     });
     this.querySelectorAll("[data-default-profile-number]").forEach((el) => {
       const saveDraft = () => { this._defaultSettingsDraft[el.dataset.defaultProfileNumber] = el.value; };

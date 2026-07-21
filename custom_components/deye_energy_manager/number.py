@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from homeassistant.components.number import NumberEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -56,9 +58,13 @@ class DeyeManagerNumber(DeyeEnergyManagerEntity, NumberEntity, RestoreEntity):
 
     async def async_added_to_hass(self):
         self._sync_physical_range()
+        if self.attr.startswith("charge_profile_") and self.runtime._charge_profile_loaded_from_store:
+            return
         if (last_state := await self.async_get_last_state()) is not None:
             try:
-                setattr(self.runtime, self.attr, float(last_state.state))
+                value = float(last_state.state)
+                if math.isfinite(value) and self.native_min_value <= value <= self.native_max_value:
+                    setattr(self.runtime, self.attr, value)
             except (TypeError, ValueError):
                 pass
 
@@ -110,11 +116,19 @@ class DeyeSlotNumber(DeyeEnergyManagerEntity, NumberEntity, RestoreEntity):
         return getattr(self.runtime.slots[self.slot_key], self.attr)
 
     async def async_added_to_hass(self):
+        restored = False
         if (last_state := await self.async_get_last_state()) is not None:
             try:
-                setattr(self.runtime.slots[self.slot_key], self.attr, float(last_state.state))
+                value = float(last_state.state)
+                if math.isfinite(value) and self.native_min_value <= value <= self.native_max_value:
+                    setattr(self.runtime.slots[self.slot_key], self.attr, value)
+                    restored = True
             except (TypeError, ValueError):
                 pass
+        if self.attr == "tou_soc" and not restored:
+            physical_soc = self.runtime.physical_tou_soc_for_slot(self.slot_key)
+            if physical_soc is not None:
+                setattr(self.runtime.slots[self.slot_key], self.attr, physical_soc)
 
     async def async_set_native_value(self, value: float):
         setattr(self.runtime.slots[self.slot_key], self.attr, value)

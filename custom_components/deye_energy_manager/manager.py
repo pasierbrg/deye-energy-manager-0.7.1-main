@@ -174,6 +174,7 @@ class DeyeEnergyManagerRuntime:
     _energy_day: str = ""
     _stats_store: Store | None = None
     _ai_store: Store | None = None
+    _charge_profile_loaded_from_store: bool = False
     _solcast_store: Store | None = None
     _learning_store: Store | None = None
     _samples_store: Store | None = None
@@ -1088,6 +1089,30 @@ class DeyeEnergyManagerRuntime:
         self.future_plan = future_plan if isinstance(future_plan, dict) else {}
         self.last_saved_at = str(data.get("last_saved_at") or "")
 
+        # The Charge template is one atomic user-owned record.  Loading all
+        # fields together prevents individual RestoreEntity callbacks from
+        # rebuilding a mixed profile after a restart.
+        raw_profile = data.get("charge_profile")
+        if isinstance(raw_profile, dict):
+            numeric = {
+                "charge_profile_charge_current": self.safe_float(raw_profile.get("charge_current"), float("nan")),
+                "charge_profile_discharge_current": self.safe_float(raw_profile.get("discharge_current"), float("nan")),
+                "charge_profile_grid_charge_current": self.safe_float(raw_profile.get("grid_charge_current"), float("nan")),
+                "charge_profile_target_soc": self.safe_float(raw_profile.get("target_soc"), float("nan")),
+            }
+            grid_enabled = raw_profile.get("grid_charge_enabled")
+            currents_ok = all(
+                math.isfinite(value) and 0 <= value <= 240
+                for key, value in numeric.items()
+                if key != "charge_profile_target_soc"
+            )
+            soc_ok = math.isfinite(numeric["charge_profile_target_soc"]) and 0 <= numeric["charge_profile_target_soc"] <= 100
+            if currents_ok and soc_ok and isinstance(grid_enabled, bool):
+                for key, value in numeric.items():
+                    setattr(self, key, value)
+                self.charge_profile_grid_enabled = grid_enabled
+                self._charge_profile_loaded_from_store = True
+
     async def async_save_ai_data(self) -> None:
         if self._ai_store is None:
             return
@@ -1096,6 +1121,13 @@ class DeyeEnergyManagerRuntime:
             "history": self.ai_history[:365],
             "future_plan": self.future_plan,
             "last_saved_at": self.last_saved_at,
+            "charge_profile": {
+                "charge_current": self.charge_profile_charge_current,
+                "discharge_current": self.charge_profile_discharge_current,
+                "grid_charge_current": self.charge_profile_grid_charge_current,
+                "target_soc": self.charge_profile_target_soc,
+                "grid_charge_enabled": self.charge_profile_grid_enabled,
+            },
         })
 
     async def async_set_ai_settings(self, settings: dict[str, Any]) -> None:
@@ -2610,6 +2642,48 @@ class DeyeEnergyManagerRuntime:
             return f"switch.deye_inverter_time_of_use_{idx}_grid_charge"
         return ""
 
+    @staticmethod
+    def _time_to_minutes(value: Any) -> int | None:
+        """Return minutes after midnight for an HA time state."""
+        text = str(value or "").strip()
+        try:
+            hour, minute = (int(part) for part in text.split(":", 2)[:2])
+        except (TypeError, ValueError):
+            return None
+        if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+            return None
+        return hour * 60 + minute
+
+    def physical_tou_soc_for_slot(self, slot_key: str) -> float | None:
+        """Read the physical Deye TOU SOC covering an hourly schedule slot.
+
+        This is used only to seed a missing new helper.  An existing restored
+        slot value, including an intentional zero, always has priority.
+        """
+        slot_row = next((row for row in SLOTS if row[0] == slot_key), None)
+        if slot_row is None:
+            return None
+        target = int(slot_row[2]) * 60
+        starts = [
+            self._time_to_minutes(self.state_text(self._tou_entity(idx, "start")))
+            for idx in range(1, 7)
+        ]
+        if any(value is None for value in starts):
+            return None
+        for offset, start in enumerate(starts):
+            end = starts[(offset + 1) % 6]
+            if start == end:
+                continue
+            contains = start <= target < end if start < end else target >= start or target < end
+            if not contains:
+                continue
+            value = self.safe_float(
+                self.state_text(self._tou_entity(offset + 1, "soc")),
+                float("nan"),
+            )
+            return value if math.isfinite(value) and 0 <= value <= 100 else None
+        return None
+
     def tou_mapping_errors(self) -> list[str]:
         return [item["entity_id"] for item in self.tou_mapping_diagnostics()["entities"] if not item["ok"]]
 
@@ -3167,11 +3241,30 @@ class DeyeEnergyManagerRuntime:
         }
         for key, value in values.items():
             self._validate_number_entity(*profile_entities[key], value)
+        previous = {
+            key: getattr(self, key)
+            for key in values
+        }
+        previous_grid = self.charge_profile_grid_enabled
+        previous_loaded = self._charge_profile_loaded_from_store
+        previous_saved_at = self.last_saved_at
         for key, value in values.items():
             setattr(self, key, value)
         self.charge_profile_grid_enabled = grid_enabled
-
-        self.mark_config_saved()
+        self._charge_profile_loaded_from_store = True
+        self.last_saved_at = ha_now().isoformat(timespec="seconds")
+        try:
+            # Await the durable write before reporting success to the card.
+            # This avoids a close/reopen race with five independent helpers.
+            await self.async_save_ai_data()
+        except Exception:
+            for key, value in previous.items():
+                setattr(self, key, value)
+            self.charge_profile_grid_enabled = previous_grid
+            self._charge_profile_loaded_from_store = previous_loaded
+            self.last_saved_at = previous_saved_at
+            self.notify_update()
+            raise
         self.last_error = ""
         self.last_action = "Zapisano szablon ustawień ładowania"
         self.notify_update()

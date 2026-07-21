@@ -1108,6 +1108,115 @@ class TouSocMappingTests(unittest.TestCase):
         self.assertNotEqual(normalized["tou_soc"], 0)
 
 
+class ChargeProfilePersistenceTests(unittest.TestCase):
+    class MemoryStore:
+        def __init__(self, value=None, fail=False):
+            self.value = value
+            self.fail = fail
+
+        async def async_save(self, value):
+            if self.fail:
+                raise RuntimeError("storage unavailable")
+            self.value = value
+
+        async def async_load(self):
+            return self.value
+
+    @staticmethod
+    def profile(grid_enabled=True, charge_current=120, discharge_current=35,
+                grid_charge_current=60, target_soc=90):
+        return {
+            "charge_current": charge_current,
+            "discharge_current": discharge_current,
+            "grid_charge_current": grid_charge_current,
+            "target_soc": target_soc,
+            "grid_charge_enabled": grid_enabled,
+        }
+
+    def load_from_store(self, store):
+        runtime = make_runtime()
+        previous_store = manager.Store
+        manager.Store = lambda *_args, **_kwargs: store
+        try:
+            asyncio.run(runtime.async_load_ai_data())
+        finally:
+            manager.Store = previous_store
+        return runtime
+
+    def test_complete_profile_with_grid_yes_survives_restart(self):
+        store = self.MemoryStore()
+        runtime = make_runtime()
+        runtime._ai_store = store
+        asyncio.run(runtime.async_save_charge_profile(self.profile()))
+
+        self.assertEqual(store.value["charge_profile"], {
+            "charge_current": 120.0,
+            "discharge_current": 35.0,
+            "grid_charge_current": 60.0,
+            "target_soc": 90.0,
+            "grid_charge_enabled": True,
+        })
+        reloaded = self.load_from_store(store)
+        self.assertTrue(reloaded._charge_profile_loaded_from_store)
+        self.assertTrue(reloaded.charge_profile_grid_enabled)
+        self.assertEqual(reloaded.charge_profile_charge_current, 120)
+        self.assertEqual(reloaded.charge_profile_discharge_current, 35)
+        self.assertEqual(reloaded.charge_profile_grid_charge_current, 60)
+        self.assertEqual(reloaded.charge_profile_target_soc, 90)
+
+    def test_complete_profile_with_grid_no_and_different_values_survives_restart(self):
+        store = self.MemoryStore()
+        runtime = make_runtime()
+        runtime._ai_store = store
+        asyncio.run(runtime.async_save_charge_profile(self.profile(
+            grid_enabled=False,
+            charge_current=75,
+            discharge_current=25,
+            grid_charge_current=15,
+            target_soc=82,
+        )))
+
+        reloaded = self.load_from_store(store)
+        self.assertFalse(reloaded.charge_profile_grid_enabled)
+        self.assertEqual(reloaded.charge_profile_charge_current, 75)
+        self.assertEqual(reloaded.charge_profile_discharge_current, 25)
+        self.assertEqual(reloaded.charge_profile_grid_charge_current, 15)
+        self.assertEqual(reloaded.charge_profile_target_soc, 82)
+
+    def test_invalid_profile_keeps_previous_runtime_and_stored_record(self):
+        store = self.MemoryStore()
+        runtime = make_runtime()
+        runtime._ai_store = store
+        asyncio.run(runtime.async_save_charge_profile(self.profile()))
+        stored_before = dict(store.value["charge_profile"])
+
+        with self.assertRaises(ValueError):
+            asyncio.run(runtime.async_save_charge_profile(self.profile(charge_current=float("nan"))))
+
+        self.assertEqual(runtime.charge_profile_charge_current, 120)
+        self.assertEqual(store.value["charge_profile"], stored_before)
+
+    def test_failed_durable_write_rolls_back_complete_runtime_profile(self):
+        runtime = make_runtime()
+        runtime.charge_profile_charge_current = 101
+        runtime.charge_profile_discharge_current = 31
+        runtime.charge_profile_grid_charge_current = 41
+        runtime.charge_profile_target_soc = 81
+        runtime.charge_profile_grid_enabled = False
+        runtime._charge_profile_loaded_from_store = True
+        runtime._ai_store = self.MemoryStore(fail=True)
+
+        with self.assertRaisesRegex(RuntimeError, "storage unavailable"):
+            asyncio.run(runtime.async_save_charge_profile(self.profile()))
+
+        self.assertEqual(runtime.charge_profile_charge_current, 101)
+        self.assertEqual(runtime.charge_profile_discharge_current, 31)
+        self.assertEqual(runtime.charge_profile_grid_charge_current, 41)
+        self.assertEqual(runtime.charge_profile_target_soc, 81)
+        self.assertFalse(runtime.charge_profile_grid_enabled)
+        self.assertTrue(runtime._charge_profile_loaded_from_store)
+
+
 class FuturePlanTests(unittest.TestCase):
     class MemoryStore:
         def __init__(self):

@@ -22,6 +22,8 @@ class DeyeManagerSwitch(DeyeEnergyManagerEntity, SwitchEntity, RestoreEntity):
         return bool(getattr(self.runtime, self.attr))
 
     async def async_added_to_hass(self):
+        if self.attr == "charge_profile_grid_enabled" and self.runtime._charge_profile_loaded_from_store:
+            return
         if (last_state := await self.async_get_last_state()) is not None:
             setattr(self.runtime, self.attr, last_state.state == "on")
 

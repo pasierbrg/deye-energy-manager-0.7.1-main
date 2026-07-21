@@ -29,10 +29,13 @@
 - Dodano usługę `apply_schedule_patch` do atomowych operacji zbiorczych.
 - Edycja zbiorcza i zastosowanie sugestii korzystają z jednej operacji backendowej.
 - Tryb `Charge` nie jest zgodą na Grid Charge; jedyną zgodę określa pole **Ładowanie z sieci** zapisane w konkretnym slocie. Profil Charge jest tylko szablonem wartości początkowych.
+- Tabela harmonogramu ponownie pokazuje zapisane wartości **Ładowanie z sieci** i **Prąd ładowania z sieci** dla każdego aktywnego slotu; dopiero mapowanie fizyczne ogranicza Grid Charge do trybu `Charge` z wartością `TAK`.
+- Okno pojedynczego slotu ponownie udostępnia wszystkie cztery tryby i komplet ręcznie edytowalnych parametrów. Jedno pole SOC zmienia znaczenie zależnie od trybu bez łączenia `minimum_sell_soc` z fizycznym `tou_soc`.
 - Nieudana aktualizacja przywraca logiczną konfigurację slotów.
 
 ### Dane i konfiguracja
 
+- Profil **Ustawienia ładowania** jest zapisywany jako jeden atomowy rekord i odtwarzany w całości po zamknięciu karty oraz restarcie Home Assistant. Błąd walidacji lub zapisu zachowuje ostatni poprawny profil.
 - Dodano Options Flow do późniejszej zmiany mapowania encji.
 - Dodano konfigurowalne sensory mocy PV, domu i baterii.
 - Bieżący dzień pokazuje realizację prognozy; trafność jest liczona po zamknięciu dnia.
@@ -54,7 +57,7 @@
 - Rozdzielono `minimum_sell_soc` od fizycznego `tou_soc`: minimalny SOC jest wyłącznie warunkiem `Selling First`, a do Deye TOU trafia niezależny SOC zapisany w konkretnym slocie, w tym docelowy SOC slotu `Charge`.
 - Migracja nie zastępuje brakującego fizycznego `tou_soc` minimalnym SOC sprzedaży ani `0`; wymagające potwierdzenia sloty blokują zapis mapowania przed pierwszą zmianą w Deye.
 - Przywrócono świadomą, bezpośrednią edycję fizycznego Deye Time Of Use. Karta ostrzega, że późniejsze zastosowanie mapowania Harmonogramu sprzedaży może nadpisać te wartości.
-- Obie dystrybuowane kopie karty mają identyczną zawartość i rewizję zasobu `v=0773`.
+- Obie dystrybuowane kopie karty mają identyczną zawartość i rewizję zasobu `v=0774`.
 - Poprawiono zabezpieczanie dynamicznych wartości HTML.
 - Usunięto błędnie wyświetlane encje numeryczne HTML, m.in. w nazwie strategii „Zrównoważony”.
 - Dodano zakładkę `Taryfa i dystrybucja` z wyborem operatora, taryfy i trybu katalogu, jawnym przyciskiem zapisu, diagnostyką aktualizacji oraz profilem 48h dla dziś i jutra.

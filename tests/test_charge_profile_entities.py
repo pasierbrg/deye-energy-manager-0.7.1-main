@@ -14,7 +14,11 @@ class ChargeProfileEntityContractTests(unittest.TestCase):
         self.assertIn("class DeyeManagerNumber(DeyeEnergyManagerEntity, NumberEntity, RestoreEntity)", NUMBER_SOURCE)
         self.assertIn('"charge_profile_charge_current": self.runtime.charge_current_number', NUMBER_SOURCE)
         self.assertIn("await self.async_get_last_state()", NUMBER_SOURCE)
-        self.assertIn("setattr(self.runtime, self.attr, float(last_state.state))", NUMBER_SOURCE)
+        self.assertIn("value = float(last_state.state)", NUMBER_SOURCE)
+        self.assertIn("math.isfinite(value)", NUMBER_SOURCE)
+        self.assertIn("self.native_min_value <= value <= self.native_max_value", NUMBER_SOURCE)
+        self.assertIn("setattr(self.runtime, self.attr, value)", NUMBER_SOURCE)
+        self.assertIn("self.runtime._charge_profile_loaded_from_store", NUMBER_SOURCE)
         self.assertIn(
             'DeyeManagerNumber(runtime, "charge_profile_charge_current", "Charge profile battery charge current", "charge_profile_charge_current", 0, 240, 5, "A")',
             NUMBER_SOURCE,

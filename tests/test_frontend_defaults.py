@@ -126,7 +126,8 @@ class FrontendDefaultRestoreTests(unittest.TestCase):
     def test_documentation_uses_current_card_cache_revision(self):
         for name in ("README.md", "INSTALL_PL.md"):
             source = (ROOT / name).read_text(encoding="utf-8")
-            self.assertIn("deye-energy-manager-card.js?v=0773", source)
+            self.assertIn("deye-energy-manager-card.js?v=0774", source)
+            self.assertNotIn("deye-energy-manager-card.js?v=0773", source)
             self.assertNotIn("deye-energy-manager-card.js?v=0772", source)
             self.assertNotIn("deye-energy-manager-card.js?v=0765", source)
 
@@ -171,6 +172,9 @@ class FrontendDefaultRestoreTests(unittest.TestCase):
             "setSelect(",
         ):
             self.assertNotIn(forbidden, method)
+        self.assertIn("Brak encji profilu", method)
+        self.assertIn("this._chargeProfileDraft = {}", method)
+        self.assertIn("this._chargeProfileGridDraft = null", method)
 
     def test_charge_current_input_keeps_draft_and_physical_range_without_zero_fallback(self):
         method = extract_method(self.sources[0], "chargeProfileInput(name, entityId, unit = \"\")")
@@ -224,9 +228,6 @@ class FrontendDefaultRestoreTests(unittest.TestCase):
     def test_charge_slot_is_editable_and_profile_is_only_a_template(self):
         source = self.sources[0]
         dialog = extract_method(source, "renderDialog(slots, touStarts)")
-        charge_start = dialog.index("const slotFields = isCharge ?")
-        non_charge_start = dialog.index(": `", charge_start)
-        charge_block = dialog[charge_start:non_charge_start]
         for required in (
             "numberInput(entities.chargeCurrent",
             "numberInput(entities.dischargeCurrent",
@@ -235,8 +236,31 @@ class FrontendDefaultRestoreTests(unittest.TestCase):
             "pill(entities.chargeEnabled)",
             "Wartości początkowe skopiowano",
         ):
-            self.assertIn(required, charge_block)
+            self.assertIn(required, dialog)
         self.assertIn("pill(entities.chargeEnabled)", dialog)
+        self.assertIn("const isSelling", dialog)
+        self.assertIn("const socField", dialog)
+        self.assertEqual(dialog.count("${socField}"), 1)
+        self.assertIn('this.pill(null, "NIE")', dialog)
+
+    def test_slot_mode_selector_contains_exactly_four_supported_modes(self):
+        method = extract_method(self.sources[0], "slotWorkModes()")
+        for mode in (
+            "Selling First",
+            "Zero Export To Load",
+            "Zero Export To CT",
+            "Charge",
+        ):
+            self.assertIn(mode, method)
+
+    def test_schedule_table_always_displays_stored_grid_permission_and_current(self):
+        source = self.sources[0]
+        self.assertIn('gridCharge ? "TAK" : "NIE"', source)
+        self.assertIn("${gridChargeCurrent} A", source)
+        self.assertNotIn(
+            'isCharge ? (slot.chargeEnabled === "on" ? "tak" : "nie") : "nie dotyczy"',
+            source,
+        )
 
     def test_settings_dialog_scrolls_on_desktop_tablet_and_phone(self):
         source = self.sources[0]
