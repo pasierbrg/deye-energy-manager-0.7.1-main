@@ -184,6 +184,11 @@ def make_runtime(soc="50", price="0.50", default_mode=None):
     runtime.default_discharge_current = 120
     runtime.default_charge_current = 120
     runtime.default_grid_charge_current = 60
+    # The regular fixture represents a configuration whose physical TOU SOC
+    # values have already been confirmed. Dedicated migration coverage below
+    # verifies the intentionally unconfirmed ``None`` state.
+    for slot in runtime.slots.values():
+        slot.tou_soc = 20
     return runtime
 
 
@@ -397,21 +402,24 @@ class MappingAndTransactionTests(unittest.TestCase):
         runtime = make_runtime()
         for index, slot in enumerate(runtime.slots.values()):
             slot.enabled = True
-            slot.minimum_sell_soc = 10 if index % 2 else 20
+            slot.tou_soc = 10 if index % 2 else 20
         self.assertTrue(runtime.mapping_error)
         self.assertGreater(len(runtime._compress_schedule_segments()), 6)
+        calls_before = list(runtime.hass.services.calls)
         self.assertFalse(asyncio.run(runtime.async_apply_targets()))
-        self.assert_safe_defaults(runtime)
+        self.assertEqual(runtime.hass.services.calls, calls_before)
+        self.assertIn("maksymalnie 6", runtime.last_error)
 
     def test_invalid_patch_rolls_back_and_keeps_safe_mode(self):
         runtime = make_runtime()
         updates = []
         for index, slot_key in enumerate(list(runtime.slots)[:8]):
-            updates.append({"slot_key": slot_key, "enabled": True, "minimum_sell_soc": 10 if index % 2 else 20})
+            updates.append({"slot_key": slot_key, "enabled": True, "tou_soc": 10 if index % 2 else 20})
+        calls_before = list(runtime.hass.services.calls)
         with self.assertRaises(ValueError):
             asyncio.run(runtime.async_apply_schedule_patch(updates))
         self.assertTrue(all(not slot.enabled for slot in runtime.slots.values()))
-        self.assert_safe_defaults(runtime)
+        self.assertEqual(runtime.hass.services.calls, calls_before)
 
     def test_tou_write_error_restores_defaults(self):
         runtime = make_runtime(default_mode=const.MODE_ZERO_EXPORT_CT)
@@ -597,7 +605,7 @@ class GridAndSlotSafetyTests(unittest.TestCase):
         slot = runtime.slots[runtime.active_slot_key()]
         slot.enabled = True
         slot.mode = const.MODE_CHARGE
-        slot.charge_enabled = grid
+        runtime.charge_profile_grid_enabled = grid
         slot.charge_current = 5
         slot.grid_charge_current = 5
         slot.minimum_sell_soc = 90
@@ -652,7 +660,6 @@ class GridAndSlotSafetyTests(unittest.TestCase):
         slot.mode = const.MODE_ZERO_EXPORT_CT
         slot.charge_current = 120
         slot.grid_charge_current = 0
-        slot.charge_enabled = False
         self.assertTrue(asyncio.run(runtime.async_apply_targets()))
         self.assertEqual(runtime.hass.states.get(const.DEFAULT_WORK_MODE_SELECT).state, const.MODE_ZERO_EXPORT_CT)
         self.assertEqual(runtime.hass.states.get(const.DEFAULT_CHARGE_CURRENT).state, "120")
@@ -698,17 +705,138 @@ class GridAndSlotSafetyTests(unittest.TestCase):
         runtime = make_runtime()
         self.configure_charge_slot(runtime, grid=True)
         asyncio.run(runtime.async_save_charge_profile({
-            "charge_current": 90,
+            "charge_current": 120,
             "discharge_current": 30,
             "grid_charge_current": 40,
             "target_soc": 85,
+            "grid_charge_enabled": True,
         }))
 
-        self.assertEqual(runtime.charge_profile_charge_current, 90)
+        self.assertEqual(runtime.charge_profile_charge_current, 120)
         self.assertEqual(runtime.charge_profile_discharge_current, 30)
         self.assertEqual(runtime.charge_profile_grid_charge_current, 40)
         self.assertEqual(runtime.charge_profile_target_soc, 85)
-        self.assertEqual(runtime.hass.states.get(const.DEFAULT_CHARGE_CURRENT).state, "90.0")
+        self.assertEqual(runtime.hass.states.get(const.DEFAULT_CHARGE_CURRENT).state, "120.0")
+
+    def test_save_charge_profile_while_stopped_persists_without_deye_calls(self):
+        runtime = make_runtime()
+        runtime.control_mode = "Stop Sell"
+        runtime.scheduler_enabled = False
+        calls_before = list(runtime.hass.services.calls)
+
+        asyncio.run(runtime.async_save_charge_profile({
+            "charge_current": 120,
+            "discharge_current": 30,
+            "grid_charge_current": 40,
+            "target_soc": 85,
+            "grid_charge_enabled": True,
+        }))
+
+        self.assertEqual(runtime.hass.services.calls, calls_before)
+        self.assertEqual(runtime.charge_profile_charge_current, 120)
+        self.assertEqual(
+            runtime.last_action,
+            "Profil zapisany. Zostanie zastosowany po wznowieniu Managera.",
+        )
+
+    def test_charge_profile_does_not_mutate_non_charge_slot_settings(self):
+        runtime = make_runtime()
+        runtime.control_mode = "Stop Sell"
+        runtime.scheduler_enabled = False
+        modes = (
+            const.MODE_SELLING_FIRST,
+            const.MODE_ZERO_EXPORT,
+            const.MODE_ZERO_EXPORT_CT,
+        )
+        protected = []
+        for slot, mode in zip(runtime.slots.values(), modes):
+            slot.enabled = True
+            slot.mode = mode
+            slot.sell_power = 4321
+            slot.discharge_current = 45
+            slot.charge_current = 55
+            slot.grid_charge_current = 65
+            slot.minimum_sell_soc = 25
+            slot.tou_soc = 35
+            protected.append((slot, dict(vars(slot))))
+
+        asyncio.run(runtime.async_save_charge_profile({
+            "charge_current": 120,
+            "discharge_current": 30,
+            "grid_charge_current": 40,
+            "target_soc": 85,
+            "grid_charge_enabled": True,
+        }))
+
+        for slot, before in protected:
+            self.assertEqual(vars(slot), before)
+
+    def test_shared_profile_is_effective_for_every_charge_slot(self):
+        runtime = make_runtime()
+        runtime.charge_profile_charge_current = 105
+        runtime.charge_profile_discharge_current = 35
+        runtime.charge_profile_grid_charge_current = 45
+        runtime.charge_profile_target_soc = 82
+        runtime.charge_profile_grid_enabled = True
+        charge_slots = list(runtime.slots.values())[:2]
+        for slot in charge_slots:
+            slot.enabled = True
+            slot.mode = const.MODE_CHARGE
+            slot.charge_current = 5
+            slot.discharge_current = 6
+            slot.grid_charge_current = 7
+            slot.tou_soc = 8
+
+        physical = [
+            segment for segment in runtime._compress_schedule_segments()
+            if segment["grid_charge"]
+        ]
+        self.assertTrue(physical)
+        for segment in physical:
+            self.assertEqual(segment["mode"], const.MODE_CHARGE)
+            self.assertEqual(segment["charge_current"], 105)
+            self.assertEqual(segment["discharge_current"], 35)
+            self.assertEqual(segment["grid_charge_current"], 45)
+            self.assertEqual(segment["tou_soc"], 82)
+
+    def test_grid_charge_yes_is_limited_to_charge_ranges(self):
+        runtime = make_runtime()
+        runtime.charge_profile_target_soc = 80
+        runtime.charge_profile_grid_enabled = True
+        charge_slot = list(runtime.slots.values())[5]
+        charge_slot.enabled = True
+        charge_slot.mode = const.MODE_CHARGE
+
+        segments = runtime._compress_schedule_segments()
+        self.assertTrue(any(segment["grid_charge"] for segment in segments))
+        self.assertTrue(all(
+            not segment["grid_charge"] or segment["mode"] == const.MODE_CHARGE
+            for segment in segments
+        ))
+
+    def test_concurrent_profile_save_and_tick_do_not_duplicate_physical_writes(self):
+        runtime = make_runtime()
+        self.configure_charge_slot(runtime, grid=True)
+
+        async def run_both():
+            await asyncio.gather(
+                runtime.async_save_charge_profile({
+                    "charge_current": 120,
+                    "discharge_current": 30,
+                    "grid_charge_current": 40,
+                    "target_soc": 85,
+                    "grid_charge_enabled": True,
+                }),
+                runtime.async_tick(),
+            )
+
+        asyncio.run(run_both())
+        physical = [
+            (domain, service, data.get("entity_id"))
+            for domain, service, data, _blocking in runtime.hass.services.calls
+            if domain in ("number", "select", "switch", "time")
+        ]
+        self.assertEqual(len(physical), len(set(physical)))
 
     def test_same_slot_failure_restores_defaults_once_per_fingerprint(self):
         runtime = make_runtime()
@@ -751,6 +879,168 @@ class GridAndSlotSafetyTests(unittest.TestCase):
         self.assertEqual(maximum, 1)
 
 
+class TouSocMappingTests(unittest.TestCase):
+    """Regression coverage for logical SOC versus physical Deye TOU SOC."""
+
+    @staticmethod
+    def _active_physical_segment(runtime):
+        hour = manager.ha_now().hour
+        for idx, segment in enumerate(runtime._compress_schedule_segments(), start=1):
+            start = int(segment["start"])
+            end = 24 if int(segment["end"]) == 0 else int(segment["end"])
+            if start <= hour < end:
+                return idx, segment
+        raise AssertionError("Nie znaleziono fizycznego zakresu dla aktywnej godziny")
+
+    def _map_active_slot(self, runtime, expected_soc, expected_grid):
+        self.assertTrue(asyncio.run(runtime.async_apply_time_of_use_map()))
+        index, segment = self._active_physical_segment(runtime)
+        self.assertEqual(segment["tou_soc"], expected_soc)
+        self.assertEqual(segment["grid_charge"], expected_grid)
+        self.assertEqual(
+            runtime.hass.states.get(f"number.deye_inverter_time_of_use_{index}_soc").state,
+            str(float(expected_soc)),
+        )
+        self.assertEqual(
+            runtime.hass.states.get(f"switch.deye_inverter_time_of_use_{index}_grid_charge").state,
+            "on" if expected_grid else "off",
+        )
+
+    def test_selling_first_maps_slot_tou_soc_not_minimum_sell_soc(self):
+        runtime = make_runtime()
+        slot = configure_selling_slot(runtime)
+        slot.minimum_sell_soc = 20
+        slot.tou_soc = 10
+        self._map_active_slot(runtime, 10, False)
+
+    def test_zero_export_load_maps_its_own_tou_soc(self):
+        runtime = make_runtime()
+        slot = runtime.slots[runtime.active_slot_key()]
+        slot.enabled = True
+        slot.mode = const.MODE_ZERO_EXPORT
+        slot.minimum_sell_soc = 30
+        slot.tou_soc = 12
+        self._map_active_slot(runtime, 12, False)
+
+    def test_zero_export_ct_maps_its_own_tou_soc(self):
+        runtime = make_runtime()
+        slot = runtime.slots[runtime.active_slot_key()]
+        slot.enabled = True
+        slot.mode = const.MODE_ZERO_EXPORT_CT
+        slot.minimum_sell_soc = 25
+        slot.tou_soc = 15
+        self._map_active_slot(runtime, 15, False)
+
+    def test_charge_profile_target_soc_wins_over_slot_tou_soc_with_grid_enabled(self):
+        runtime = make_runtime()
+        slot = runtime.slots[runtime.active_slot_key()]
+        slot.enabled = True
+        slot.mode = const.MODE_CHARGE
+        slot.tou_soc = 10
+        runtime.charge_profile_target_soc = 80
+        runtime.charge_profile_grid_enabled = True
+        self._map_active_slot(runtime, 80, True)
+
+    def test_charge_profile_target_soc_wins_over_slot_tou_soc_with_grid_disabled(self):
+        runtime = make_runtime()
+        slot = runtime.slots[runtime.active_slot_key()]
+        slot.enabled = True
+        slot.mode = const.MODE_CHARGE
+        slot.tou_soc = 10
+        runtime.charge_profile_target_soc = 70
+        runtime.charge_profile_grid_enabled = False
+        self._map_active_slot(runtime, 70, False)
+
+    def test_disabled_slot_keeps_its_tou_soc_instead_of_zero(self):
+        runtime = make_runtime()
+        slot = runtime.slots[runtime.active_slot_key()]
+        slot.enabled = False
+        slot.tou_soc = 10
+        self._map_active_slot(runtime, 10, False)
+
+    def test_diagnostics_keep_sale_guard_and_physical_tou_soc_separate(self):
+        runtime = make_runtime()
+        slot = configure_selling_slot(runtime)
+        slot.minimum_sell_soc = 20
+        slot.tou_soc = 10
+        self.assertTrue(asyncio.run(runtime.async_apply_time_of_use_map()))
+
+        diagnostics = runtime.diagnostics()
+        active = diagnostics["active_slot_control"]
+        self.assertEqual(active["minimum_sell_soc"], 20)
+        self.assertEqual(active["tou_soc"], 10)
+        self.assertEqual(active["effective_tou_soc"], 10)
+        self.assertEqual(active["physical_soc_actual"], "10.0")
+        self.assertFalse(active["grid_charge_expected"])
+        self.assertEqual(active["grid_charge_actual"], "off")
+        self.assertEqual(len(diagnostics["physical_tou"]), 6)
+
+    def test_unconfirmed_tou_soc_blocks_physical_write_without_substitution(self):
+        runtime = make_runtime()
+        slot = runtime.slots[runtime.active_slot_key()]
+        slot.tou_soc = None
+        calls_before = list(runtime.hass.services.calls)
+
+        self.assertFalse(asyncio.run(runtime.async_apply_time_of_use_map()))
+        self.assertIn("wymaga potwierdzenia", runtime.last_error)
+        self.assertEqual(runtime.hass.services.calls, calls_before)
+
+    def test_changing_minimum_sell_soc_does_not_change_tou_mapping(self):
+        runtime = make_runtime()
+        slot = configure_selling_slot(runtime)
+        slot.tou_soc = 17
+        slot.minimum_sell_soc = 20
+        before = runtime._compress_schedule_segments()
+        slot.minimum_sell_soc = 90
+        after = runtime._compress_schedule_segments()
+        self.assertEqual(before, after)
+
+    def test_nonphysical_slot_parameters_do_not_create_tou_boundary(self):
+        runtime = make_runtime()
+        slot = runtime.slots[runtime.active_slot_key()]
+        slot.enabled = True
+        slot.mode = const.MODE_ZERO_EXPORT
+        slot.tou_soc = 20
+        before = runtime._compress_schedule_segments()
+        slot.mode = const.MODE_ZERO_EXPORT_CT
+        slot.sell_power = 5000
+        slot.charge_current = 120
+        slot.discharge_current = 30
+        slot.grid_charge_current = 60
+        slot.minimum_sell_soc = 90
+        after = runtime._compress_schedule_segments()
+        self.assertEqual(before, after)
+
+    def test_changing_tou_soc_creates_a_physical_boundary(self):
+        runtime = make_runtime()
+        before = runtime._compress_schedule_segments()
+        self.assertEqual({segment["tou_soc"] for segment in before}, {20.0})
+
+        changed = list(runtime.slots.values())[8]
+        changed.tou_soc = 33
+        after = runtime._compress_schedule_segments()
+
+        self.assertEqual({segment["tou_soc"] for segment in after}, {20.0, 33.0})
+        self.assertTrue(any(
+            segment["start"] == 8 and segment["end"] == 9 and segment["tou_soc"] == 33
+            for segment in after
+        ))
+
+    def test_migration_preserves_existing_tou_soc_beside_legacy_min_soc(self):
+        runtime = make_runtime()
+        normalized = runtime._validate_future_plan_updates([{
+            "slot_key": "05_06",
+            "mode": const.MODE_SELLING_FIRST,
+            "min_soc": 80,
+            "tou_soc": 37,
+        }])[0]
+
+        self.assertEqual(normalized["minimum_sell_soc"], 80)
+        self.assertEqual(normalized["tou_soc"], 37)
+        self.assertNotEqual(normalized["tou_soc"], normalized["minimum_sell_soc"])
+        self.assertNotEqual(normalized["tou_soc"], 0)
+
+
 class FuturePlanTests(unittest.TestCase):
     class MemoryStore:
         def __init__(self):
@@ -766,7 +1056,7 @@ class FuturePlanTests(unittest.TestCase):
         runtime = make_runtime()
         runtime._ai_store = self.MemoryStore()
         update = {
-            "slot_key": "05_06", "enabled": True, "charge_enabled": False,
+            "slot_key": "05_06", "enabled": True,
             "mode": const.MODE_SELLING_FIRST, "sell_power": 5000,
             "discharge_current": 120, "charge_current": 0,
             "grid_charge_current": 0, "minimum_sell_soc": 20, "min_sell_price": 0.9,

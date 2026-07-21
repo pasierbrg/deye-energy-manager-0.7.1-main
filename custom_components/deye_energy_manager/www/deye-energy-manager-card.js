@@ -4,7 +4,8 @@ class DeyeEnergyManagerCard extends HTMLElement {
     this._interacting = false;
     this._pendingRender = false;
     this._dialog = null;
-    this._slotGridChargeOptimistic = {};
+    this._chargeProfileDraft = {};
+    this._defaultSettingsDraft = {};
     this._scrollTops = {};
     this._pageScrollTops = [];
     this._interactionRelease = null;
@@ -888,64 +889,29 @@ class DeyeEnergyManagerCard extends HTMLElement {
   slotEntities(key, label) {
     return {
       sellEnabled: this.slotEntity("switch", key, label, [`slot_${key}_enabled`, `${key}_enabled`, `slot_${key}`, key], [], ["charge"]),
-      chargeEnabled: this.slotEntity("switch", key, label, [`slot_${key}_charge_enabled`, `${key}_charge_enabled`, `charge_${key}`], ["charge"]),
       mode: this.slotEntity("select", key, label, [`slot_${key}_mode`, `${key}_mode`], ["mode"]),
       sellPower: this.slotEntity("number", key, label, [`slot_${key}_sell_power`, `${key}_sell_power`], ["sell", "power"]),
       dischargeCurrent: this.slotEntity("number", key, label, [`slot_${key}_discharge_current`, `${key}_discharge_current`], ["discharge", "current"]),
       chargeCurrent: this.slotEntity("number", key, label, [`slot_${key}_charge_current`, `${key}_charge_current`], ["charge", "current"], ["discharge"]),
       gridChargeCurrent: this.slotEntity("number", key, label, [`slot_${key}_grid_charge_current`, `${key}_grid_charge_current`], ["grid", "charge", "current"]),
       minimumSellSoc: this.slotEntity("number", key, label, [`slot_${key}_minimum_sell_soc`, `${key}_minimum_sell_soc`], ["minimum", "sell", "soc"]),
+      touSoc: this.slotEntity("number", key, label, [`slot_${key}_tou_soc`, `${key}_tou_soc`], ["tou", "battery", "soc"]),
       minSellPrice: this.slotEntity("number", key, label, [`slot_${key}_min_sell_price`, `${key}_min_sell_price`], ["minimum", "sell", "price"]),
     };
   }
 
-  slotGridChargeState(key, entities) {
-    if (Object.prototype.hasOwnProperty.call(this._slotGridChargeOptimistic, key)) {
-      return this._slotGridChargeOptimistic[key] ? "on" : "off";
-    }
-    if (this.exists(entities.chargeEnabled)) {
-      return this.displayState(entities.chargeEnabled, "off") === "on" ? "on" : "off";
-    }
-    const status = this.entity("sensor", "manager_status");
-    const data = this._hass.states[status]?.attributes?.slot_grid_charge?.[key];
-    return data?.enabled ? "on" : "off";
+  chargeProfileGridEnabled() {
+    return this.displayState(this.entity("switch", "charge_profile_grid_enabled"), "off") === "on";
   }
 
-  slotGridChargePill(key, entities) {
-    const state = this.slotGridChargeState(key, entities);
-    return `<button type="button" class="pill ${state}" data-slot-grid-charge="${key}" data-grid-entity="${entities.chargeEnabled}">${state === "on" ? "tak" : "nie"}</button>`;
-  }
-
-  async setSlotGridCharge(key, entities, enabled, gridChargeCurrent = null, refresh = true) {
-    this._slotGridChargeOptimistic[key] = Boolean(enabled);
-    if (refresh) this.render();
-    try {
-      const data = { slot_key: key, enabled: Boolean(enabled) };
-      if (gridChargeCurrent !== null) data.grid_charge_current = Number(gridChargeCurrent);
-      if (this.hasService("deye_energy_manager", "set_slot_grid_charge")) {
-        await this.callService("deye_energy_manager", "set_slot_grid_charge", data);
-      } else {
-        // Starsza instancja backendu może jeszcze nie udostępniać tej usługi.
-        // Zapisz helpery i fizyczne sloty Deye bezpośrednio standardowymi usługami HA.
-        if (gridChargeCurrent !== null && this.exists(entities.gridChargeCurrent)) {
-          await this.setNumber(entities.gridChargeCurrent, Number(gridChargeCurrent));
-        }
-        if (this.exists(entities.chargeEnabled)) {
-          await this.turnSwitch(entities.chargeEnabled, enabled);
-        }
-        await this.applyDeyeTimeOfUseMap();
-      }
-      window.setTimeout(() => {
-        delete this._slotGridChargeOptimistic[key];
-        if (refresh) this.render();
-      }, 2500);
-      return true;
-    } catch (error) {
-      delete this._slotGridChargeOptimistic[key];
-      this.failSave(entities.chargeEnabled || `slot:${key}:grid_charge`, error);
-      if (refresh) this.render();
-      return false;
-    }
+  chargeProfileValues() {
+    return {
+      chargeCurrent: this.numberState(this.entity("number", "charge_profile_charge_current"), "brak"),
+      dischargeCurrent: this.numberState(this.entity("number", "charge_profile_discharge_current"), "brak"),
+      gridChargeCurrent: this.numberState(this.entity("number", "charge_profile_grid_charge_current"), "brak"),
+      targetSoc: this.numberState(this.entity("number", "charge_profile_target_soc"), "brak"),
+      gridEnabled: this.chargeProfileGridEnabled(),
+    };
   }
 
   touEntities(idx) {
@@ -957,44 +923,6 @@ class DeyeEnergyManagerCard extends HTMLElement {
       grid: `switch.deye_inverter_time_of_use_${idx}_grid_charge`,
       gridCurrent: "number.deye_inverter_maximum_battery_grid_charge_current",
     };
-  }
-
-  async applyDeyeTimeOfUseMap() {
-    const segments = this.scheduleSegments(this.scheduleSlots());
-    if (segments.length > 6) {
-      throw new Error(`Mapowanie wymaga ${segments.length} zakresów, a Deye obsługuje maksymalnie 6.`);
-    }
-    await this.turnSwitch("switch.deye_inverter_time_of_use", true);
-    for (let idx = 1; idx <= 6; idx += 1) {
-      const item = segments[idx - 1];
-      const tou = this.touEntities(idx);
-      if (!item) {
-        if (this.exists(tou.grid)) await this.turnSwitch(tou.grid, false);
-        continue;
-      }
-      if (this.exists(tou.start)) {
-        await this.setTime(tou.start, `${String(item.start).padStart(2, "0")}:00`);
-      }
-      if (this.exists(tou.soc)) await this.setNumber(tou.soc, item.minimumSellSoc);
-      if (this.exists(tou.grid)) await this.turnSwitch(tou.grid, Boolean(item.chargeEnabled));
-    }
-    const activeKey = this.state(this.entity("sensor", "active_slot"));
-    const active = this.scheduleSlots().find(([key]) => key === activeKey);
-    if (active) {
-      const activeEntities = this.slotEntities(active[0], active[1]);
-      if (this.slotGridChargeState(active[0], activeEntities) === "on") {
-        const current = this.numberState(activeEntities.gridChargeCurrent, 0);
-        if (this.exists("number.deye_inverter_maximum_battery_grid_charge_current")) {
-          await this.setNumber("number.deye_inverter_maximum_battery_grid_charge_current", current);
-        }
-        if (this.exists("number.deye_inverter_maximum_battery_charge_current")) {
-          await this.setNumber(
-            "number.deye_inverter_maximum_battery_charge_current",
-            this.numberState(activeEntities.chargeCurrent, 0),
-          );
-        }
-      }
-    }
   }
 
   callService(domain, service, data = {}) {
@@ -1103,7 +1031,9 @@ class DeyeEnergyManagerCard extends HTMLElement {
   }
 
   setNumber(entityId, value) {
-    const parsed = Number(String(value).replace(",", "."));
+    const raw = String(value).trim().replace(",", ".");
+    if (!raw) return Promise.resolve(false);
+    const parsed = Number(raw);
     if (!Number.isFinite(parsed) || !this.exists(entityId)) return Promise.resolve(false);
     return this.optimisticService(entityId, parsed, "number", "set_value", { entity_id: entityId, value: parsed });
   }
@@ -1119,9 +1049,11 @@ class DeyeEnergyManagerCard extends HTMLElement {
       }
       values[field.dataset.chargeProfileNumber] = value;
     }
+    values.grid_charge_enabled = this.rawValue("charge-profile-grid", "off") === "on";
     this.beginSave();
     try {
       await this.callService("deye_energy_manager", "save_charge_profile", values);
+      this._chargeProfileDraft = {};
       this.finishSave();
       return true;
     } catch (error) {
@@ -1133,7 +1065,8 @@ class DeyeEnergyManagerCard extends HTMLElement {
   setSelect(entityId, option) {
     if (!this.exists(entityId)) return Promise.resolve(false);
     // The mode never implies permission to charge from the grid.  That
-    // permission is controlled solely by „Ładowanie z sieci” in the slot.
+    // permission is controlled solely by „Ładowanie z sieci” in the shared
+    // Charge profile.
     return this.optimisticService(entityId, option, "select", "select_option", { entity_id: entityId, option });
   }
 
@@ -1203,11 +1136,64 @@ class DeyeEnergyManagerCard extends HTMLElement {
     </label>`;
   }
 
-  chargeProfileInput(name, entityId, unit = "") {
+  touSocInput(entityId) {
+    // A missing physical TOU SOC is intentionally not shown as zero.  Zero is
+    // valid only when the user explicitly enters it and the Deye entity allows
+    // it; migration never guesses this physical setting.
+    const state = this.displayState(entityId, "");
+    const known = state && !["unknown", "unavailable", "None", "null"].includes(state);
     return `<label class="field">
-      <input data-charge-profile-number="${this.escapeHtml(name)}" type="text" inputmode="decimal" value="${this.escapeHtml(this.numberState(entityId))}" ${this.exists(entityId) ? "" : "disabled"}>
+      <input data-number="${this.escapeHtml(entityId)}" type="text" inputmode="decimal" value="${this.escapeHtml(known ? state : "")}" placeholder="wymaga potwierdzenia" ${this.exists(entityId) ? "" : "disabled"}>
+      <span>%</span>
+    </label>`;
+  }
+
+  chargeProfileInput(name, entityId, unit = "") {
+    const entity = this._hass.states[entityId];
+    const current = entity && !["unknown", "unavailable"].includes(entity.state) ? entity.state : "";
+    const value = Object.prototype.hasOwnProperty.call(this._chargeProfileDraft, name) ? this._chargeProfileDraft[name] : current;
+    const min = Number(entity?.attributes?.min);
+    const max = Number(entity?.attributes?.max);
+    const step = Number(entity?.attributes?.step);
+    const range = Number.isFinite(min) && Number.isFinite(max) && Number.isFinite(step) && step > 0;
+    return `<label class="field">
+      <input data-charge-profile-number="${this.escapeHtml(name)}" type="number" inputmode="decimal" value="${this.escapeHtml(value)}" ${range ? `min="${min}" max="${max}" step="${step}"` : ""} ${this.exists(entityId) && current !== "" && range ? "" : "disabled"}>
       <span>${this.escapeHtml(unit)}</span>
     </label>`;
+  }
+
+  defaultProfileInput(name, entityId, unit = "") {
+    const entity = this._hass.states[entityId];
+    const current = entity && !["unknown", "unavailable"].includes(entity.state) ? entity.state : "";
+    const value = Object.prototype.hasOwnProperty.call(this._defaultSettingsDraft, name)
+      ? this._defaultSettingsDraft[name] : current;
+    const min = Number(entity?.attributes?.min);
+    const max = Number(entity?.attributes?.max);
+    const step = Number(entity?.attributes?.step);
+    const range = Number.isFinite(min) && Number.isFinite(max) && Number.isFinite(step) && step > 0;
+    return `<label class="field"><input data-default-profile-number="${this.escapeHtml(name)}" type="number" inputmode="decimal" value="${this.escapeHtml(value)}" ${range ? `min="${min}" max="${max}" step="${step}"` : ""} ${this.exists(entityId) && current !== "" && range ? "" : "disabled"}><span>${this.escapeHtml(unit)}</span></label>`;
+  }
+
+  async saveDefaultSettings() {
+    const values = { mode: this.rawValue("default-work-mode", "") };
+    for (const field of this.querySelectorAll("[data-default-profile-number]")) {
+      const value = Number(String(field.value).replace(",", "."));
+      if (!Number.isFinite(value)) {
+        this.failSave("default_settings", new Error("Wprowadź poprawne wartości ustawień domyślnych"));
+        return false;
+      }
+      values[field.dataset.defaultProfileNumber] = value;
+    }
+    this.beginSave();
+    try {
+      await this.callService("deye_energy_manager", "save_default_settings", values);
+      this._defaultSettingsDraft = {};
+      this.finishSave();
+      return true;
+    } catch (error) {
+      this.failSave("default_settings", error);
+      return false;
+    }
   }
 
   rawSelect(name, options = [], value = "") {
@@ -1529,8 +1515,15 @@ class DeyeEnergyManagerCard extends HTMLElement {
     const tou = attrs.tou || {};
     const missingTou = Array.isArray(tou.missing) ? tou.missing : [];
     const attempt = attrs.last_schedule_attempt && typeof attrs.last_schedule_attempt === "object" ? attrs.last_schedule_attempt : null;
+    const activeControl = attrs.active_slot_control && typeof attrs.active_slot_control === "object" ? attrs.active_slot_control : {};
+    const physicalTou = Array.isArray(attrs.physical_tou) ? attrs.physical_tou : [];
+    const diagnosticValue = (value) => value === null || value === undefined || value === "" ? "brak" : String(value);
     const renderValues = (values) => Object.entries(values || {}).map(([label, value]) => `<li><span>${this.escapeHtml(label)}</span><strong>${this.escapeHtml(String(value))}</strong></li>`).join("") || "<li>Brak danych</li>";
     const attemptSection = attempt?.status ? `<section class="diagnostic-section"><h3>Ostatnia pr\u00f3ba zastosowania harmonogramu</h3><div class="schedule-attempt ${attempt.status === "failed" ? "failed" : "ok"}"><div><span>Wynik</span><strong>${attempt.status === "failed" ? "Nieudana" : attempt.status === "applied" ? "Potwierdzona" : "W toku"}</strong></div><div><span>Czas / slot</span><strong>${this.formatAppliedAt(attempt.at)} \u00b7 ${this.escapeHtml(attempt.slot || "brak")}</strong></div><div><span>Etap</span><strong>${this.escapeHtml(attempt.stage || "brak")}</strong></div><div class="schedule-attempt-message"><span>Szczeg\u00f3\u0142y</span><strong>${this.escapeHtml(attempt.message || "Brak dodatkowej informacji")}</strong></div><div><span>Oczekiwane</span><ul>${renderValues(attempt.expected)}</ul></div><div><span>Odczytane</span><ul>${renderValues(attempt.actual)}</ul></div></div></section>` : "";
+    const currentRows = Object.entries(activeControl.currents || {}).map(([name, value]) => `<tr><td>${this.escapeHtml(name)}</td><td>${this.escapeHtml(diagnosticValue(value))}</td></tr>`).join("") || `<tr><td colspan="2">Brak danych o pr\u0105dach</td></tr>`;
+    const activeControlSection = `<section class="diagnostic-section"><h3>SOC i parametry aktywnego slotu</h3><div class="schedule-attempt"><div><span>Slot / tryb</span><strong>${this.escapeHtml(diagnosticValue(activeControl.slot))} \u00b7 ${this.escapeHtml(diagnosticValue(activeControl.mode))}</strong></div><div><span>Minimalny SOC sprzeda\u017cy</span><strong>${this.escapeHtml(diagnosticValue(activeControl.minimum_sell_soc))}%</strong></div><div><span>SOC logiczny Deye TOU</span><strong>${this.escapeHtml(diagnosticValue(activeControl.tou_soc))}%</strong></div><div><span>Docelowy SOC profilu Charge</span><strong>${this.escapeHtml(diagnosticValue(activeControl.charge_profile_target_soc))}%</strong></div><div><span>Efektywny SOC TOU</span><strong>${this.escapeHtml(diagnosticValue(activeControl.effective_tou_soc))}%</strong></div><div><span>Fizyczny zakres / odczyt SOC</span><strong>${this.escapeHtml(diagnosticValue(activeControl.physical_range))} \u00b7 ${this.escapeHtml(diagnosticValue(activeControl.physical_soc_actual))}%</strong></div><div><span>Grid Charge oczekiwany / odczytany</span><strong>${activeControl.grid_charge_expected ? "TAK" : "NIE"} \u00b7 ${this.escapeHtml(diagnosticValue(activeControl.grid_charge_actual))}</strong></div><div class="schedule-attempt-message"><span>Pr\u0105dy oczekiwane i odczytane</span><table class="settings-table"><tbody>${currentRows}</tbody></table></div></div></section>`;
+    const physicalRows = physicalTou.map((row) => `<tr class="${row.active ? "active" : ""}"><td>${this.escapeHtml(diagnosticValue(row.range))}</td><td>${this.escapeHtml(diagnosticValue(row.expected_start))}\u2013${this.escapeHtml(diagnosticValue(row.expected_end))}</td><td>${this.escapeHtml(diagnosticValue(row.expected_soc))}% / ${this.escapeHtml(diagnosticValue(row.actual_soc))}%</td><td>${row.expected_grid_charge ? "TAK" : "NIE"} / ${this.escapeHtml(diagnosticValue(row.actual_grid_charge))}</td></tr>`).join("") || `<tr><td colspan="4">Brak danych fizycznego mapowania</td></tr>`;
+    const physicalSection = `<section class="diagnostic-section"><h3>Fizyczne zakresy Deye TOU</h3><div class="diagnostic-entities"><table class="settings-table"><thead><tr><th>Zakres</th><th>Oczekiwane godziny</th><th>SOC oczekiwany / odczytany</th><th>Grid oczekiwany / odczytany</th></tr></thead><tbody>${physicalRows}</tbody></table></div></section>`;
     const touSection = `<section class="diagnostic-section"><h3>Mapowanie Deye Time Of Use</h3><div class="tou-diagnostics"><span class="diag-badge ${tou.ok === false ? "error" : "ok"}">${tou.ok === false ? "B\u0141\u0104D" : "OK"}</span><strong>${tou.ok === false ? `Brakuje encji: ${this.escapeHtml(missingTou.join(", "))}` : "Wszystkie encje Time Of Use s\u0105 dost\u0119pne"}</strong></div></section>`;
     return `<div class="diagnostic-summary">
       <div><span>Po\u0142\u0105czenie z falownikiem</span><strong class="${connected ? "good" : "bad"}">${connected ? "Po\u0142\u0105czono" : "Problem"}</strong></div>
@@ -1543,6 +1536,8 @@ class DeyeEnergyManagerCard extends HTMLElement {
       <div><span>Wersje</span><strong>Integracja ${this.escapeHtml(attrs.integration_version || "0.7.6")} \u00b7 karta 0.7.6</strong></div>
     </div>
     ${attemptSection}
+    ${activeControlSection}
+    ${physicalSection}
     ${touSection}
     <section class="diagnostic-section"><h3>Wymagane encje</h3><div class="diagnostic-entities"><table class="settings-table"><thead><tr><th>Encja</th><th>Stan</th></tr></thead><tbody>${entityRows}</tbody></table></div></section>
     <section class="diagnostic-section"><h3>Sterowanie i odczyt</h3><div class="diagnostic-actions"><button class="resume" data-resume-manager="1" ${this._resumeApplying ? "disabled" : ""}>${this._resumeApplying ? "W\u0142\u0105czanie Managera\u2026" : "W\u0142\u0105cz Manager i harmonogram"}</button><button data-system-defaults="1" data-default-action="1" data-default-label="Zatrzymaj managera i zastosuj domy\u015blne" ${this._defaultsApplying ? "disabled" : ""}>${this._defaultsApplying ? "Stosowanie ustawie\u0144 domy\u015blnych\u2026" : "Zatrzymaj managera i zastosuj domy\u015blne"}</button><button data-refresh-entities="1">Ponownie odczytaj encje</button></div><p class="hint">W\u0142\u0105czenie Managera ustawia tryb Schedule i Scheduler. Nie w\u0142\u0105cza oddzielnego harmonogramu \u0142adowania z sieci.</p></section>
@@ -1679,8 +1674,6 @@ class DeyeEnergyManagerCard extends HTMLElement {
     const sellPower = this.rawValue("multi-sell-power", 5000);
     const dischargeCurrent = this.rawValue("multi-discharge-current", 120);
     const chargeCurrent = this.rawValue("multi-charge-current", 0);
-    const gridChargeValue = this.rawValue("multi-grid-charge", "off") === "on";
-    const gridChargeCurrent = this.rawValue("multi-grid-charge-current", 0);
     const minSoc = this.rawValue("multi-min-soc", 40);
     const minSellPrice = this.rawValue("multi-min-sell-price", 0);
 
@@ -1689,12 +1682,10 @@ class DeyeEnergyManagerCard extends HTMLElement {
       if (checked("sellPower")) update.sell_power = sellPower;
       if (checked("dischargeCurrent")) update.discharge_current = dischargeCurrent;
       if (checked("chargeCurrent")) update.charge_current = chargeCurrent;
-      if (checked("gridChargeCurrent")) update.grid_charge_current = gridChargeCurrent;
       if (checked("minSoc")) update.minimum_sell_soc = minSoc;
       if (checked("minSellPrice")) update.min_sell_price = minSellPrice;
       if (checked("mode")) update.mode = mode;
       if (checked("active")) update.enabled = activeValue;
-      if (checked("gridCharge")) update.charge_enabled = gridChargeValue;
       return update;
     });
     if (!await this.applySchedulePatch(updates)) return;
@@ -1981,8 +1972,6 @@ class DeyeEnergyManagerCard extends HTMLElement {
         sellPower: 0,
         dischargeCurrent: 0,
         chargeCurrent: 0,
-        gridCharge: "off",
-        gridChargeCurrent: 0,
         minimumSellSoc: 0,
         minSellPrice: 0,
       };
@@ -1994,8 +1983,6 @@ class DeyeEnergyManagerCard extends HTMLElement {
       sellPower: this.numberState(entities.sellPower, 0),
       dischargeCurrent: this.numberState(entities.dischargeCurrent, 0),
       chargeCurrent: this.numberState(entities.chargeCurrent, 0),
-      gridCharge: this.displayState(entities.chargeEnabled, "off") === "on" ? "on" : "off",
-      gridChargeCurrent: this.numberState(entities.gridChargeCurrent, 0),
       minimumSellSoc: this.numberState(entities.minimumSellSoc, 0),
       minSellPrice: this.numberState(entities.minSellPrice, 0),
     };
@@ -2010,8 +1997,6 @@ class DeyeEnergyManagerCard extends HTMLElement {
       "multi-sell-power": bulk.sellPower,
       "multi-discharge-current": bulk.dischargeCurrent,
       "multi-charge-current": bulk.chargeCurrent,
-      "multi-grid-charge": bulk.gridCharge,
-      "multi-grid-charge-current": bulk.gridChargeCurrent,
       "multi-min-soc": bulk.minimumSellSoc,
       "multi-min-sell-price": bulk.minSellPrice,
     };
@@ -2023,11 +2008,13 @@ class DeyeEnergyManagerCard extends HTMLElement {
   }
 
   scheduleSegments(slots) {
+    const profile = this.chargeProfileValues();
     const rows = slots.map(([key, label]) => {
       const entities = this.slotEntities(key, label);
       const enabled = this.state(entities.sellEnabled) === "on";
       const mode = enabled ? this.state(entities.mode, "Zero Export To Load") : "Wy\u0142\u0105czone";
-      const chargeEnabled = this.slotGridChargeState(key, entities) === "on";
+      const isCharge = enabled && mode === "Charge";
+      const slotTouSoc = this.asNumber(this.numberState(entities.touSoc, ""));
       const data = {
         key,
         label,
@@ -2036,18 +2023,20 @@ class DeyeEnergyManagerCard extends HTMLElement {
         enabled,
         mode,
         sellPower: this.asNumber(this.numberState(entities.sellPower, 0)) || 0,
-        dischargeCurrent: this.asNumber(this.numberState(entities.dischargeCurrent, 0)) || 0,
-        chargeCurrent: this.asNumber(this.numberState(entities.chargeCurrent, 0)) || 0,
-        gridChargeCurrent: this.asNumber(this.numberState(entities.gridChargeCurrent, 0)) || 0,
+        dischargeCurrent: isCharge ? profile.dischargeCurrent : this.numberState(entities.dischargeCurrent, "brak"),
+        chargeCurrent: isCharge ? profile.chargeCurrent : this.numberState(entities.chargeCurrent, "brak"),
+        gridChargeCurrent: isCharge ? profile.gridChargeCurrent : this.numberState(entities.gridChargeCurrent, "brak"),
         minimumSellSoc: this.asNumber(this.numberState(entities.minimumSellSoc, 0)) || 0,
         minSellPrice: this.asNumber(this.numberState(entities.minSellPrice, 0)) || 0,
-        chargeEnabled: enabled && chargeEnabled,
+        touSoc: isCharge ? this.asNumber(profile.targetSoc) : slotTouSoc,
+        chargeMode: isCharge,
+        chargeEnabled: isCharge && profile.gridEnabled,
       };
       return data;
     });
-    // Fizyczne sloty Deye Time of Use przechowuja granice czasu, SOC i Grid Charge.
-    // Pozostale parametry harmonogramu sa stosowane godzinowo przez manager.
-    const same = (a, b) => ["minimumSellSoc", "chargeEnabled"].every((key) => a[key] === b[key]);
+    // Fizyczne sloty Deye Time of Use przechowują wyłącznie granice, SOC i Grid Charge.
+    // Minimalny SOC sprzedaży oraz prądy nie mogą tworzyć dodatkowych zakresów TOU.
+    const same = (a, b) => ["touSoc", "chargeEnabled"].every((key) => a[key] === b[key]);
     const segments = [];
     rows.forEach((row) => {
       if (segments.length && same(segments[segments.length - 1], row)) {
@@ -2316,7 +2305,6 @@ class DeyeEnergyManagerCard extends HTMLElement {
     const updates = rows.map((row) => ({
       slot_key: row.key,
       enabled: row.enabled,
-      charge_enabled: row.chargeEnabled,
       ...(row.enabled ? {
         mode: row.mode,
         sell_power: Number(row.sellPower) || 0,
@@ -2397,13 +2385,14 @@ class DeyeEnergyManagerCard extends HTMLElement {
     return {
       slot_key: this.aiSlotKey(row.hour),
       enabled: true,
-      charge_enabled: charging,
       mode: selling ? "Selling First" : charging ? "Charge" : "Zero Export To Load",
       sell_power: selling ? Math.round(this.asNumber(settings.maxSellPower) || 0) : 0,
       discharge_current: selling ? Number(settings.maxDischargeCurrent) || 0 : 0,
       charge_current: charging ? Number(settings.maxChargeCurrent) || 0 : 0,
       grid_charge_current: charging ? Number(settings.maxGridChargeCurrent) || 0 : 0,
-      minimum_sell_soc: charging ? Number(settings.targetSoc) || 0 : Number(settings.minSoc) || 0,
+      // The Charge target is owned by the shared Charge profile.  It must
+      // never leak into the Selling First eligibility threshold.
+      minimum_sell_soc: selling ? Number(settings.minSoc) || 0 : 0,
       min_sell_price: selling ? Number(settings.minSellPrice) || 0 : 0,
     };
   }
@@ -3111,8 +3100,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
         const start = this.state(tou.start, "00:00:00").slice(0, 5);
         return `<tr>
           <td>${idx}</td><td>${start}</td><td>${end}</td><td>${this.numberState(tou.soc)}%</td>
-          <td>${this.numberState(tou.gridCurrent)} A</td><td>${this.pill(tou.grid)}</td>
-          <td><button class="set-btn" data-open-tou="${idx}">Edytuj</button></td>
+          <td>${this.displayState(tou.grid, "brak") === "on" ? "tak" : this.displayState(tou.grid, "brak") === "off" ? "nie" : "brak"}</td>
         </tr>`;
       }).join("");
       const aiSettings = this.aiSettings();
@@ -3121,35 +3109,38 @@ class DeyeEnergyManagerCard extends HTMLElement {
         <td>${index + 1}</td>
         <td>${String(item.start).padStart(2, "0")}:00</td>
         <td>${String(item.end).padStart(2, "0")}:00</td>
-        <td>${item.chargeEnabled ? "Ładowanie z sieci" : "Limit SOC"}</td>
+        <td>${item.chargeMode ? "Charge" : "Limit SOC"}</td>
         <td>${item.chargeEnabled ? "tak" : "nie"}</td>
-        <td>${item.minimumSellSoc}%</td>
+        <td>${item.touSoc === null ? "wymaga potwierdzenia" : `${item.touSoc}%`}</td>
       </tr>`).join("");
 
       let body = "";
       if (tab === "defaults") {
         body = `
           <h3>Ustawienia domyślne dla falownika</h3>
-          ${this.row("Domyślny tryb falownika", this.selectInput(this.entity("select", "default_work_mode"), this.inverterWorkModes()))}
-          ${this.row("Domyślny limit mocy sprzedaży", this.numberInput(this.entity("number", "default_sell_power"), "W"))}
-          ${this.row("Domyślny prąd rozładowania", this.numberInput(this.entity("number", "default_discharge_current"), "A"))}
-          ${this.row("Domyślny prąd ładowania baterii", this.numberInput(this.entity("number", "default_charge_current"), "A"))}
-          ${this.row("Domyślny prąd ładowania z sieci", this.numberInput(this.entity("number", "default_grid_charge_current"), "A"))}
+          <div class="hint">Te wartości są automatycznie stosowane po Stop Sell, zatrzymaniu awaryjnym albo błędzie sterowania. Ustaw tutaj konfigurację bezpieczną dla swojej instalacji.</div>
+          ${this.row("Domyślny tryb falownika", this.rawSelect("default-work-mode", this.inverterWorkModes(), this.state(this.entity("select", "default_work_mode"))))}
+          ${this.row("Domyślna maksymalna moc sprzedaży", this.defaultProfileInput("sell_power", this.entity("number", "default_sell_power"), "W"))}
+          ${this.row("Domyślny prąd rozładowania", this.defaultProfileInput("discharge_current", this.entity("number", "default_discharge_current"), "A"))}
+          ${this.row("Domyślny prąd ładowania baterii", this.defaultProfileInput("charge_current", this.entity("number", "default_charge_current"), "A"))}
+          ${this.row("Domyślny prąd ładowania z sieci", this.defaultProfileInput("grid_charge_current", this.entity("number", "default_grid_charge_current"), "A"))}
+          <div class="hint">Stan powrotu: ${this.escapeHtml(this.state(this.entity("select", "default_work_mode")))} · ${this.escapeHtml(this.state(this.entity("number", "default_sell_power")))} W · rozładowanie ${this.escapeHtml(this.state(this.entity("number", "default_discharge_current")))} A · ładowanie ${this.escapeHtml(this.state(this.entity("number", "default_charge_current")))} A · sieć ${this.escapeHtml(this.state(this.entity("number", "default_grid_charge_current")))} A</div>
+          <button class="wide-action" data-save-default-settings="1">Zapisz ustawienia domyślne</button>
           <button class="wide-action" data-action="apply-defaults" data-default-action="1" data-default-label="Zastosuj ustawienia domyślne teraz" ${this._defaultsApplying ? "disabled" : ""}>${this._defaultsApplying ? "Stosowanie ustawień domyślnych…" : "Zastosuj ustawienia domyślne teraz"}</button>
-          <div class="hint defaults-status ${this._defaultsStatus}" data-defaults-status ${this._defaultsMessage ? "" : "hidden"}>${this.escapeHtml(this._defaultsMessage)}</div>`;
-      } else if (tab === "charging") {
-        body = `
           <h3>Ustawienia ładowania</h3>
-          <div class="hint">Profil jest stosowany przez każdy aktywny slot <strong>Charge</strong>. Ładowanie z sieci jest włączane wyłącznie wtedy, gdy w tym slocie wybierzesz „Ładowanie z sieci: tak”.</div>
+          <div class="hint">Profil jest używany przez każdy aktywny slot <strong>Charge</strong>. Fizyczne zmiany wykonuje wyłącznie Harmonogram sprzedaży przez mapowanie 24h do 6 zakresów Deye TOU.</div>
           ${this.row("Tryb ładowania", "Charge")}
+          ${this.row("Ładowanie z sieci", this.rawSelect("charge-profile-grid", [["on", "TAK"], ["off", "NIE"]], this.chargeProfileGridEnabled() ? "on" : "off"))}
           ${this.row("Prąd ładowania", this.chargeProfileInput("charge_current", this.entity("number", "charge_profile_charge_current"), "A"))}
           ${this.row("Prąd rozładowania", this.chargeProfileInput("discharge_current", this.entity("number", "charge_profile_discharge_current"), "A"))}
           ${this.row("Prąd ładowania z sieci", this.chargeProfileInput("grid_charge_current", this.entity("number", "charge_profile_grid_charge_current"), "A"))}
           ${this.row("Docelowy SOC", this.chargeProfileInput("target_soc", this.entity("number", "charge_profile_target_soc"), "%"))}
-          <button class="wide-action" data-save-charge-profile="1">Zapisz ustawienia ładowania</button>`;
+          <div class="hint">Ładowanie z sieci: NIE — bateria może ładować się z PV. Ładowanie z sieci: TAK — jest dozwolone wyłącznie w zakresach Charge.</div>
+          <button class="wide-action" data-save-charge-profile="1">Zapisz ustawienia ładowania</button>
+          <div class="hint defaults-status ${this._defaultsStatus}" data-defaults-status ${this._defaultsMessage ? "" : "hidden"}>${this.escapeHtml(this._defaultsMessage)}</div>`;
       } else if (tab === "tou") {
-        body = `<div class="hint">Sześć fizycznych slotów Deye. Zakres kończy się na starcie następnego slotu.</div>
-          <table class="settings-table"><thead><tr><th>Slot</th><th>Od</th><th>Do</th><th>SOC</th><th>Prąd</th><th>Ładowanie z sieci</th><th>Akcja</th></tr></thead><tbody>${touRows}</tbody></table>`;
+        body = `<div class="hint">Sześć fizycznych slotów Deye. To widok diagnostyczny: zakresy zapisuje wyłącznie Harmonogram sprzedaży przez mapowanie 24 h do 6 zakresów Deye TOU.</div>
+          <table class="settings-table"><thead><tr><th>Slot</th><th>Od</th><th>Do</th><th>SOC baterii Deye (TOU)</th><th>Ładowanie z sieci</th></tr></thead><tbody>${touRows}</tbody></table>`;
       } else if (tab === "mapping") {
         body = `<div class="hint">${this.mapWarning(slots)}. Harmonogram 24h jest kompresowany do zakresów zgodnych z 6 slotami Deye.</div>
           <table class="settings-table"><thead><tr><th>Slot Deye</th><th>Od</th><th>Do</th><th>Funkcja</th><th>Ładowanie z sieci</th><th>SOC</th></tr></thead><tbody>${segmentRows}</tbody></table>`;
@@ -3193,7 +3184,6 @@ class DeyeEnergyManagerCard extends HTMLElement {
           <div class="settings-layout">
             <nav class="settings-nav">
               ${tabButton("defaults", "Ustawienia Trybów")}
-              ${tabButton("charging", "Ustawienia ładowania")}
               ${tabButton("tou", "Deye Time Of Use")}
               ${tabButton("mapping", "Mapowanie 24h")}
               ${tabButton("ai", "AI i analiza")}
@@ -3264,8 +3254,6 @@ class DeyeEnergyManagerCard extends HTMLElement {
             <label class="apply-row"><input type="checkbox" data-apply-field="sellPower" checked> Moc sprzedaży ${this.rawNumber("multi-sell-power", bulk.sellPower, "W")}</label>
             <label class="apply-row"><input type="checkbox" data-apply-field="dischargeCurrent" checked> Prąd rozładowania ${this.rawNumber("multi-discharge-current", bulk.dischargeCurrent, "A")}</label>
             <label class="apply-row"><input type="checkbox" data-apply-field="chargeCurrent" checked> Prąd ładowania ${this.rawNumber("multi-charge-current", bulk.chargeCurrent, "A")}</label>
-            <label class="apply-row"><input type="checkbox" data-apply-field="gridCharge" checked> Ładowanie z sieci ${this.rawSelect("multi-grid-charge", [["on", "tak"], ["off", "nie"]], bulk.gridCharge)}</label>
-            <label class="apply-row"><input type="checkbox" data-apply-field="gridChargeCurrent" checked> Prąd z sieci ${this.rawNumber("multi-grid-charge-current", bulk.gridChargeCurrent, "A")}</label>
             <label class="apply-row"><input type="checkbox" data-apply-field="minSoc" checked> Minimalny SOC sprzedaży ${this.rawNumber("multi-min-soc", bulk.minimumSellSoc, "%")}</label>
             <label class="apply-row"><input type="checkbox" data-apply-field="minSellPrice" checked> Sprzedawaj od ceny ${this.rawNumber("multi-min-sell-price", bulk.minSellPrice, "PLN")}</label>
             <div class="preview-box"><strong>Podgląd zmian</strong><br>Wartości startowe są pobrane z pierwszej zaznaczonej godziny. Odznacz pole, którego nie chcesz zmieniać.</div>
@@ -3281,14 +3269,13 @@ class DeyeEnergyManagerCard extends HTMLElement {
       const endIdx = idx === 6 ? 1 : idx + 1;
       return `<div class="overlay" data-close-dialog="1">
         <section class="dialog" data-dialog-box="1">
-          <div class="dialog-head"><strong>Edytuj Time Of Use - slot ${idx}</strong><button type="button" data-close-dialog="1">${this.iconSvg("close")}</button></div>
+          <div class="dialog-head"><strong>Deye Time Of Use - slot ${idx}</strong><button type="button" data-close-dialog="1">${this.iconSvg("close")}</button></div>
           <div class="dialog-body">
-            ${this.row("Od", this.timeInput(tou.start))}
-            ${this.row(`Do / start slotu ${endIdx}`, this.timeInput(tou.end))}
-            ${this.row("Docelowy / minimalny SOC", this.numberInput(tou.soc, "%"))}
-            ${this.row("Ładowanie z sieci", this.pill(tou.grid))}
-            ${this.row("Prąd ładowania z sieci", this.numberInput(tou.gridCurrent, "A"))}
-            <div class="hint">Jeśli harmonogram 24h ma tryb Charge, integracja spróbuje wpisać te zakresy do slotów Deye automatycznie.</div>
+            ${this.row("Od", this.state(tou.start, "brak danych"))}
+            ${this.row(`Do / start slotu ${endIdx}`, this.state(tou.end, "brak danych"))}
+            ${this.row("SOC baterii Deye (TOU)", `${this.state(tou.soc, "brak danych")}%`)}
+            ${this.row("Ładowanie z sieci", this.state(tou.grid, "brak danych") === "on" ? "TAK" : "NIE")}
+            <div class="hint">Widok diagnostyczny. Fizyczne zakresy Time Of Use są zapisywane wyłącznie przez Harmonogram sprzedaży podczas serializowanej transakcji.</div>
           </div>
           <div class="dialog-actions"><button type="button" data-close-dialog="1">Zamknij</button></div>
         </section>
@@ -3299,19 +3286,30 @@ class DeyeEnergyManagerCard extends HTMLElement {
     if (!slot) return "";
     const [key, label] = slot;
     const entities = this.slotEntities(key, label);
+    const isCharge = this.state(entities.mode, "Zero Export To Load") === "Charge";
+    const profile = this.chargeProfileValues();
+    const slotFields = isCharge ? `
+          <div class="hint">Ten slot korzysta ze wspólnego profilu z sekcji <strong>Ustawienia Trybów → Ustawienia ładowania</strong>.</div>
+          ${this.row("Ładowanie z sieci", profile.gridEnabled ? "TAK" : "NIE")}
+          ${this.row("Prąd ładowania baterii", `${profile.chargeCurrent} A`) }
+          ${this.row("Prąd rozładowania", `${profile.dischargeCurrent} A`) }
+          ${this.row("Prąd ładowania z sieci", `${profile.gridChargeCurrent} A`) }
+          ${this.row("Docelowy SOC Deye (TOU)", `${profile.targetSoc}%`) }`
+      : `
+          ${this.row("Moc sprzedaży", this.numberInput(entities.sellPower, "W"))}
+          ${this.row("Prąd rozładowania", this.numberInput(entities.dischargeCurrent, "A"))}
+          ${this.row("Prąd ładowania baterii", this.numberInput(entities.chargeCurrent, "A"))}
+          ${this.row("SOC baterii Deye (TOU)", this.touSocInput(entities.touSoc))}
+          <div class="hint">Fizyczna wartość SOC zapisywana do zakresu Time Of Use falownika. Nie jest to minimalny SOC wymagany do rozpoczęcia sprzedaży.</div>
+          ${this.row("Minimalny SOC sprzedaży", this.numberInput(entities.minimumSellSoc, "%"))}
+          ${this.row("Sprzedawaj od ceny", this.numberInput(entities.minSellPrice, "PLN"))}`;
     return `<div class="overlay" data-close-dialog="1">
       <section class="dialog" data-dialog-box="1">
         <div class="dialog-head"><strong>Godzina ${label}</strong><button type="button" data-close-dialog="1">${this.iconSvg("close")}</button></div>
         <div class="dialog-body">
           ${this.row("Aktywne", this.pill(entities.sellEnabled))}
           ${this.row("Tryb", this.selectInput(entities.mode, this.slotWorkModes()))}
-          ${this.row("Moc sprzedaży", this.numberInput(entities.sellPower, "W"))}
-          ${this.row("Prąd rozładowania", this.numberInput(entities.dischargeCurrent, "A"))}
-          ${this.row("Prąd ładowania baterii", this.numberInput(entities.chargeCurrent, "A"))}
-          ${this.row("Ładowanie z sieci", this.slotGridChargePill(key, entities))}
-          ${this.row("Prąd ładowania z sieci", this.numberInput(entities.gridChargeCurrent, "A"))}
-          ${this.row("Minimalny SOC sprzedaży", this.numberInput(entities.minimumSellSoc, "%"))}
-          ${this.row("Sprzedawaj od ceny", this.numberInput(entities.minSellPrice, "PLN"))}
+          ${slotFields}
         </div>
         <div class="dialog-actions"><button type="button" data-close-dialog="1">Zamknij</button></div>
       </section>
@@ -3366,11 +3364,18 @@ class DeyeEnergyManagerCard extends HTMLElement {
 
     const selectedCount = this.selectedSlotList(slots).length;
     const bulk = this.bulkValues(slots);
+    const chargeProfile = this.chargeProfileValues();
     const scheduleRows = slots.map(([key, label]) => {
       const entities = this.slotEntities(key, label);
       const enabled = this.displayState(entities.sellEnabled) === "on";
       const mode = this.state(entities.mode, "Zero Export To Load");
-      const gridCharge = this.slotGridChargeState(key, entities) === "on";
+      const isCharge = enabled && mode === "Charge";
+      // Charge uses one shared profile.  An individual row never grants
+      // permission to charge from the grid.
+      const gridCharge = isCharge && chargeProfile.gridEnabled;
+      const chargeCurrent = isCharge ? chargeProfile.chargeCurrent : this.numberState(entities.chargeCurrent);
+      const gridChargeCurrent = isCharge ? chargeProfile.gridChargeCurrent : "-";
+      const touSoc = isCharge ? chargeProfile.targetSoc : this.numberState(entities.touSoc, "wymaga potwierdzenia");
       const selected = this._selectedSlots?.has(key);
       const meta = this.modeMeta(mode, enabled);
       const rowClass = [
@@ -3384,10 +3389,10 @@ class DeyeEnergyManagerCard extends HTMLElement {
         <td data-label="Tryb">${this.modePill(mode, enabled)}</td>
         <td data-label="Moc sprzedaży" class="metric sell">${enabled ? `${this.iconSvg("sell")} ${this.numberState(entities.sellPower)} W` : "-"}</td>
         <td data-label="Prąd rozładowania" class="metric discharge">${enabled ? `↓ ${this.numberState(entities.dischargeCurrent)} A` : "-"}</td>
-        <td data-label="Prąd ładowania" class="metric charge">${enabled ? `↑ ${this.numberState(entities.chargeCurrent)} A` : "-"}</td>
-        <td data-label="Ładowanie z sieci" class="metric grid">${enabled ? this.slotGridChargePill(key, entities) : "-"}</td>
-        <td data-label="Prąd z sieci" class="metric grid-current">${enabled ? `⚡ ${this.numberState(entities.gridChargeCurrent)} A` : "-"}</td>
-        <td data-label="Min. SOC sprzedaży" class="metric soc">${enabled ? `◇ ${this.numberState(entities.minimumSellSoc)}%` : "-"}</td>
+        <td data-label="Prąd ładowania" class="metric charge">${enabled ? `↑ ${chargeCurrent} A` : "-"}</td>
+        <td data-label="Ładowanie z sieci" class="metric grid">${enabled ? (isCharge ? this.pill(null, gridCharge ? "TAK" : "NIE") : "nie dotyczy") : "-"}</td>
+        <td data-label="Prąd z sieci" class="metric grid-current">${enabled ? (isCharge && gridCharge ? `⚡ ${gridChargeCurrent} A` : "-") : "-"}</td>
+        <td data-label="SOC baterii Deye (TOU)" class="metric soc">${enabled ? `◇ ${touSoc}%` : "-"}</td>
         <td data-label="Cena min." class="metric price-limit">${enabled ? `${this.formatPrice(this.numberState(entities.minSellPrice))} PLN` : "-"}</td>
         <td data-label="Aktywne">${this.pill(entities.sellEnabled, enabled ? "ON" : "OFF")}</td>
         <td data-label="Akcja"><button class="icon-only" data-open-slot="sell:${key}" title="Edytuj">${this.iconSvg("edit")}</button></td>
@@ -3406,8 +3411,6 @@ class DeyeEnergyManagerCard extends HTMLElement {
       <label class="apply-row"><input type="checkbox" data-apply-field="sellPower" checked><span>Moc sprzedaży</span>${this.rawNumber("multi-sell-power", bulk.sellPower, "W")}</label>
       <label class="apply-row"><input type="checkbox" data-apply-field="dischargeCurrent" checked><span>Prąd rozładowania</span>${this.rawNumber("multi-discharge-current", bulk.dischargeCurrent, "A")}</label>
       <label class="apply-row"><input type="checkbox" data-apply-field="chargeCurrent" checked><span>Prąd ładowania</span>${this.rawNumber("multi-charge-current", bulk.chargeCurrent, "A")}</label>
-      <label class="apply-row"><input type="checkbox" data-apply-field="gridCharge" checked><span>Ładowanie z sieci</span>${this.rawSelect("multi-grid-charge", [["on", "tak"], ["off", "nie"]], bulk.gridCharge)}</label>
-      <label class="apply-row"><input type="checkbox" data-apply-field="gridChargeCurrent" checked><span>Prąd z sieci</span>${this.rawNumber("multi-grid-charge-current", bulk.gridChargeCurrent, "A")}</label>
       <label class="apply-row"><input type="checkbox" data-apply-field="minSoc" checked><span>Minimalny SOC sprzedaży</span>${this.rawNumber("multi-min-soc", bulk.minimumSellSoc, "%")}</label>
       <label class="apply-row"><input type="checkbox" data-apply-field="minSellPrice" checked><span>Sprzedawaj od ceny</span>${this.rawNumber("multi-min-sell-price", bulk.minSellPrice, "PLN")}</label>
       <div class="preview-box"><strong>Podgląd zmian</strong><br>Wybrane pola zostaną wpisane tylko do zaznaczonych godzin. Pola bez znacznika zostają bez zmian.</div>
@@ -3422,10 +3425,8 @@ class DeyeEnergyManagerCard extends HTMLElement {
         <td data-label="Slot">${idx}</td>
         <td data-label="Od">${start}</td>
         <td data-label="Do">${end}</td>
-        <td data-label="Batt">${this.numberState(tou.soc)} %</td>
-        <td data-label="Prąd">${this.numberState(tou.gridCurrent)} A</td>
-        <td data-label="Sieć">${this.pill(tou.grid)}</td>
-        <td data-label="Ustaw"><button class="set-btn" data-open-tou="${idx}">Ustaw</button></td>
+        <td data-label="SOC Deye">${this.numberState(tou.soc)} %</td>
+        <td data-label="Ładowanie z sieci">${this.displayState(tou.grid, "brak") === "on" ? "tak" : this.displayState(tou.grid, "brak") === "off" ? "nie" : "brak"}</td>
       </tr>`;
     }).join("");
 
@@ -3571,7 +3572,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
                       <col class="col-current"><col class="col-current"><col class="col-grid"><col class="col-grid-current">
                       <col class="col-soc"><col class="col-price"><col class="col-active"><col class="col-action">
                     </colgroup>
-                    <thead><tr><th class="check-col"></th><th class="time-col">Godz.</th><th>Tryb</th><th>Moc</th><th>Rozł.</th><th>Ład.</th><th>Grid</th><th>Prąd sieci</th><th>SOC</th><th>Cena min.</th><th>Aktywne</th><th>Akcja</th></tr></thead>
+                    <thead><tr><th class="check-col"></th><th class="time-col">Godz.</th><th>Tryb</th><th>Moc</th><th>Rozł.</th><th>Ład.</th><th>Ładowanie z sieci</th><th>Prąd ładowania z sieci</th><th>SOC Deye</th><th>Cena min.</th><th>Aktywne</th><th>Akcja</th></tr></thead>
                     <tbody>${scheduleRows}</tbody>
                   </table>
                   <div class="schedule-foot">
@@ -3611,23 +3612,6 @@ class DeyeEnergyManagerCard extends HTMLElement {
       el.addEventListener("click", (event) => {
         event.stopPropagation();
         this.toggle(el.dataset.toggle);
-      });
-    });
-    this.querySelectorAll("[data-slot-grid-charge]").forEach((el) => {
-      el.addEventListener("click", async (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        const key = el.dataset.slotGridCharge;
-        const slot = slots.find(([slotKey]) => slotKey === key);
-        if (!slot) return;
-        const entities = this.slotEntities(slot[0], slot[1]);
-        const enabled = this.slotGridChargeState(key, entities) !== "on";
-        await this.setSlotGridCharge(
-          key,
-          entities,
-          enabled,
-          this.numberState(entities.gridChargeCurrent, 0),
-        );
       });
     });
     this.querySelectorAll("[data-number]").forEach((el) => {
@@ -3674,10 +3658,6 @@ class DeyeEnergyManagerCard extends HTMLElement {
       event.stopPropagation();
       const [type, key] = el.dataset.openSlot.split(":");
       this._dialog = { type, key };
-      this.render();
-    }));
-    this.querySelectorAll("[data-open-tou]").forEach((el) => el.addEventListener("click", () => {
-      this._dialog = { type: "tou", idx: el.dataset.openTou };
       this.render();
     }));
     this.querySelectorAll("[data-open-ai]").forEach((el) => el.addEventListener("click", () => {
@@ -3744,6 +3724,17 @@ class DeyeEnergyManagerCard extends HTMLElement {
     this.querySelectorAll("[data-apply-multi]").forEach((el) => el.addEventListener("click", () => this.applyMultiEdit(slots)));
     this.querySelectorAll("[data-action='apply-defaults']").forEach((el) => el.addEventListener("click", () => this.restoreDefaults()));
     this.querySelectorAll("[data-save-charge-profile]").forEach((el) => el.addEventListener("click", () => this.saveChargeProfile()));
+    this.querySelectorAll("[data-save-default-settings]").forEach((el) => el.addEventListener("click", () => this.saveDefaultSettings()));
+    this.querySelectorAll("[data-charge-profile-number]").forEach((el) => {
+      const saveDraft = () => { this._chargeProfileDraft[el.dataset.chargeProfileNumber] = el.value; };
+      el.addEventListener("input", saveDraft);
+      el.addEventListener("change", saveDraft);
+    });
+    this.querySelectorAll("[data-default-profile-number]").forEach((el) => {
+      const saveDraft = () => { this._defaultSettingsDraft[el.dataset.defaultProfileNumber] = el.value; };
+      el.addEventListener("input", saveDraft);
+      el.addEventListener("change", saveDraft);
+    });
     this.querySelectorAll("[data-action='select-all']").forEach((el) => el.addEventListener("click", () => {
       slots.forEach(([key]) => this._selectedSlots.add(key));
       this._selectionMode = true;

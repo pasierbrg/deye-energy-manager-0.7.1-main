@@ -24,7 +24,38 @@ class DeyeManagerNumber(DeyeEnergyManagerEntity, NumberEntity, RestoreEntity):
     def native_value(self):
         return getattr(self.runtime, self.attr)
 
+    def _physical_range_entity(self):
+        """Return the mapped Deye entity that owns this helper's limits."""
+        sources = {
+            "default_sell_power": self.runtime.max_sell_power_number,
+            "default_discharge_current": self.runtime.discharge_current_number,
+            "default_charge_current": self.runtime.charge_current_number,
+            "default_grid_charge_current": self.runtime.grid_charge_current_number,
+            "charge_profile_charge_current": self.runtime.charge_current_number,
+            "charge_profile_discharge_current": self.runtime.discharge_current_number,
+            "charge_profile_grid_charge_current": self.runtime.grid_charge_current_number,
+            "charge_profile_target_soc": self.runtime._tou_entity(1, "soc"),
+        }
+        return sources.get(self.attr)
+
+    def _sync_physical_range(self) -> None:
+        """Expose the actual Deye min/max/step to the card and HA controls."""
+        entity_id = self._physical_range_entity()
+        state = self.runtime.hass.states.get(entity_id) if entity_id else None
+        attrs = getattr(state, "attributes", {}) or {}
+        try:
+            minimum = float(attrs["min"])
+            maximum = float(attrs["max"])
+            step = float(attrs["step"])
+        except (KeyError, TypeError, ValueError):
+            return
+        if minimum <= maximum and step > 0:
+            self._attr_native_min_value = minimum
+            self._attr_native_max_value = maximum
+            self._attr_native_step = step
+
     async def async_added_to_hass(self):
+        self._sync_physical_range()
         if (last_state := await self.async_get_last_state()) is not None:
             try:
                 setattr(self.runtime, self.attr, float(last_state.state))
@@ -32,7 +63,32 @@ class DeyeManagerNumber(DeyeEnergyManagerEntity, NumberEntity, RestoreEntity):
                 pass
 
     async def async_set_native_value(self, value: float):
+        previous = getattr(self.runtime, self.attr)
         setattr(self.runtime, self.attr, value)
+        # The default profile is deliberately a save-only operation.  It is
+        # applied to the inverter only by restore_defaults or a safety path.
+        if self.attr.startswith("default_"):
+            self.runtime.mark_config_saved()
+            self.runtime.notify_update()
+            return
+        # Direct edits from Home Assistant's number entity remain compatible
+        # with the shared Charge profile and its single schedule path.
+        if self.attr.startswith("charge_profile_"):
+            try:
+                await self.runtime.async_save_charge_profile({
+                    "charge_current": self.runtime.charge_profile_charge_current,
+                    "discharge_current": self.runtime.charge_profile_discharge_current,
+                    "grid_charge_current": self.runtime.charge_profile_grid_charge_current,
+                    "target_soc": self.runtime.charge_profile_target_soc,
+                    "grid_charge_enabled": self.runtime.charge_profile_grid_enabled,
+                })
+            except Exception:
+                # Do not leave an invalid direct helper edit in memory when
+                # profile validation rejects it before the schedule write.
+                setattr(self.runtime, self.attr, previous)
+                self.runtime.notify_update()
+                raise
+            return
         self.runtime.mark_config_saved()
         self.runtime.notify_update()
         await self.runtime.async_tick()
@@ -92,6 +148,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 DeyeSlotNumber(runtime, key, label, "charge_current", "Charge current", 240, 5, "A"),
                 DeyeSlotNumber(runtime, key, label, "grid_charge_current", "Grid charge current", 240, 5, "A"),
                 DeyeSlotNumber(runtime, key, label, "minimum_sell_soc", "Minimum sell SOC", 100, 1, "%"),
+                DeyeSlotNumber(runtime, key, label, "tou_soc", "Deye TOU battery SOC", 100, 1, "%"),
                 DeyeSlotNumber(runtime, key, label, "min_sell_price", "Minimum sell price", 5, 0.01, "PLN/kWh"),
             ]
         )

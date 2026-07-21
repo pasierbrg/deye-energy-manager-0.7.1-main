@@ -75,7 +75,7 @@ restore_defaults:
   description: Ręcznie zastosuj ustawienia zapisane przez użytkownika w oknie Ustawienia domyślne.
 resume_manager:
   name: Włącz Manager i harmonogram
-  description: "Świadomie włącza tryb Schedule i Scheduler po Stop Sell lub zatrzymaniu awaryjnym. Nie zmienia ustawienia Ładowanie z sieci w slotach; tylko wartość tak zezwala na ładowanie z sieci."
+  description: "Świadomie włącza tryb Schedule i Scheduler po Stop Sell lub zatrzymaniu awaryjnym. Nie zmienia wspólnego profilu Charge; tylko Ładowanie z sieci: TAK w tym profilu zezwala na fizyczne Grid Charge."
 emergency_stop:
   name: Emergency stop
   description: Natychmiast zatrzaśnij sterowanie managera i zastosuj 1:1 pełny zestaw ustawień domyślnych użytkownika, włącznie z wybranym trybem.
@@ -97,26 +97,6 @@ rate_ai_analysis:
 clear_history:
   name: Wyczyść historię i dane
   description: Usuwa historię sugestii, uczenia i porównań Solcast.
-set_slot_grid_charge:
-  name: Ustaw ładowanie z sieci dla slotu
-  description: Włącza lub wyłącza ładowanie z sieci dla wybranej godziny harmonogramu 24h.
-  fields:
-    slot_key:
-      required: true
-      selector:
-        text:
-    enabled:
-      required: true
-      selector:
-        boolean:
-    grid_charge_current:
-      required: false
-      selector:
-        number:
-          min: 0
-          max: 240
-          step: 5
-          unit_of_measurement: A
 apply_schedule_patch:
   name: Apply schedule patch
   description: Atomically validate and apply multiple 24-hour schedule slot changes. Intended for the bundled dashboard card.
@@ -139,6 +119,11 @@ save_charge_profile:
   name: Zapisz ustawienia ładowania
   description: Zapisuje pełny profil używany wyłącznie przez sloty harmonogramu w trybie Charge.
   fields:
+    grid_charge_enabled:
+      required: true
+      description: "Ładowanie z sieci: TAK zezwala wspólnemu profilowi Charge włączyć Grid Charge w fizycznym TOU Deye; NIE zawsze pozostawia je wyłączone. Dodatni prąd nie jest zgodą na ładowanie z sieci."
+      selector:
+        boolean:
     charge_current:
       required: true
       selector:
@@ -171,6 +156,50 @@ save_charge_profile:
           max: 100
           step: 1
           unit_of_measurement: "%"
+save_default_settings:
+  name: Zapisz ustawienia domyślne falownika
+  description: Zapisuje pełen stan powrotu użytkownika bez natychmiastowego zapisu do falownika. Jest stosowany tylko świadomie albo po błędzie sterowania.
+  fields:
+    mode:
+      required: true
+      selector:
+        select:
+          options:
+            - Selling First
+            - Zero Export To Load
+            - Zero Export To CT
+    sell_power:
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 13000
+          step: 1
+          unit_of_measurement: W
+    discharge_current:
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 240
+          step: 1
+          unit_of_measurement: A
+    charge_current:
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 240
+          step: 1
+          unit_of_measurement: A
+    grid_charge_current:
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 240
+          step: 1
+          unit_of_measurement: A
 refresh_tariff_catalog:
   name: Odśwież katalog taryf OSD
   description: Sprawdza wersjonowany katalog taryf. W razie błędu zachowuje ostatnią poprawną lub wbudowaną wersję.

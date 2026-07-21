@@ -29,12 +29,30 @@ class DeyeManagerSwitch(DeyeEnergyManagerEntity, SwitchEntity, RestoreEntity):
         if self.attr == "emergency_stop":
             await self.runtime.async_emergency_stop()
             return
+        if self.attr == "charge_profile_grid_enabled":
+            await self.runtime.async_save_charge_profile({
+                "charge_current": self.runtime.charge_profile_charge_current,
+                "discharge_current": self.runtime.charge_profile_discharge_current,
+                "grid_charge_current": self.runtime.charge_profile_grid_charge_current,
+                "target_soc": self.runtime.charge_profile_target_soc,
+                "grid_charge_enabled": True,
+            })
+            return
         setattr(self.runtime, self.attr, True)
         self.runtime.mark_config_saved()
         self.runtime.notify_update()
         await self.runtime.async_tick()
 
     async def async_turn_off(self, **kwargs: Any):
+        if self.attr == "charge_profile_grid_enabled":
+            await self.runtime.async_save_charge_profile({
+                "charge_current": self.runtime.charge_profile_charge_current,
+                "discharge_current": self.runtime.charge_profile_discharge_current,
+                "grid_charge_current": self.runtime.charge_profile_grid_charge_current,
+                "target_soc": self.runtime.charge_profile_target_soc,
+                "grid_charge_enabled": False,
+            })
+            return
         setattr(self.runtime, self.attr, False)
         self.runtime.mark_config_saved()
         self.runtime.notify_update()
@@ -42,35 +60,26 @@ class DeyeManagerSwitch(DeyeEnergyManagerEntity, SwitchEntity, RestoreEntity):
 
 
 class DeyeSlotSwitch(DeyeEnergyManagerEntity, SwitchEntity, RestoreEntity):
-    def __init__(self, runtime, slot_key, label, charge=False):
-        key = f"slot_{slot_key}_charge_enabled" if charge else f"slot_{slot_key}_enabled"
-        name = f"Charge {label}" if charge else f"Slot {label}"
+    def __init__(self, runtime, slot_key, label):
+        key = f"slot_{slot_key}_enabled"
+        name = f"Slot {label}"
         super().__init__(runtime, key, name)
         self.slot_key = slot_key
-        self.charge = charge
 
     @property
     def is_on(self):
         slot = self.runtime.slots[self.slot_key]
-        return slot.charge_enabled if self.charge else slot.enabled
+        return slot.enabled
 
     async def async_added_to_hass(self):
         if (last_state := await self.async_get_last_state()) is not None:
             slot = self.runtime.slots[self.slot_key]
-            if self.charge:
-                slot.charge_enabled = last_state.state == "on"
-            else:
-                slot.enabled = last_state.state == "on"
+            slot.enabled = last_state.state == "on"
 
     async def async_turn_on(self, **kwargs: Any):
         slot = self.runtime.slots[self.slot_key]
-        if self.charge:
-            slot.charge_enabled = True
-            slot.enabled = True
-            self.runtime.scheduler_enabled = True
-        else:
-            slot.enabled = True
-            self.runtime.scheduler_enabled = True
+        slot.enabled = True
+        self.runtime.scheduler_enabled = True
         self.runtime._clear_slot_failure_latch()
         self.runtime.mark_config_saved()
         self.runtime.notify_update()
@@ -78,10 +87,7 @@ class DeyeSlotSwitch(DeyeEnergyManagerEntity, SwitchEntity, RestoreEntity):
 
     async def async_turn_off(self, **kwargs: Any):
         slot = self.runtime.slots[self.slot_key]
-        if self.charge:
-            slot.charge_enabled = False
-        else:
-            slot.enabled = False
+        slot.enabled = False
         self.runtime._clear_slot_failure_latch()
         self.runtime.mark_config_saved()
         self.runtime.notify_update()
@@ -95,8 +101,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         DeyeManagerSwitch(runtime, "soc_guard_enabled", "SOC guard", "soc_guard_enabled"),
         DeyeManagerSwitch(runtime, "price_guard_enabled", "Price guard", "price_guard_enabled"),
         DeyeManagerSwitch(runtime, "emergency_stop", "Emergency stop", "emergency_stop"),
+        DeyeManagerSwitch(runtime, "charge_profile_grid_enabled", "Charge profile grid charge", "charge_profile_grid_enabled"),
     ]
     for key, label, *_ in SLOTS:
         entities.append(DeyeSlotSwitch(runtime, key, label))
-        entities.append(DeyeSlotSwitch(runtime, key, label, charge=True))
     async_add_entities(entities)

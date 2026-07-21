@@ -126,8 +126,143 @@ class FrontendDefaultRestoreTests(unittest.TestCase):
     def test_documentation_uses_current_card_cache_revision(self):
         for name in ("README.md", "INSTALL_PL.md"):
             source = (ROOT / name).read_text(encoding="utf-8")
-            self.assertIn("deye-energy-manager-card.js?v=0771", source)
+            self.assertIn("deye-energy-manager-card.js?v=0772", source)
+            self.assertNotIn(f"deye-energy-manager-card.js?v={770 + 1}", source)
             self.assertNotIn("deye-energy-manager-card.js?v=0765", source)
+
+    def test_card_has_no_direct_edit_path_for_physical_tou_entities(self):
+        source = self.sources[0]
+        self.assertNotIn("data-open-tou", source)
+        tou_dialog = extract_method(source, "renderDialog(slots, touStarts)")
+        for forbidden in (
+            "this.timeInput(tou.",
+            "this.numberInput(tou.",
+            "this.pill(tou.grid)",
+            "data-slot-grid-charge",
+        ):
+            self.assertNotIn(forbidden, tou_dialog)
+
+    def test_unconfirmed_logical_tou_soc_never_renders_as_zero(self):
+        source = self.sources[0]
+        self.assertIn("touSocInput(entityId)", source)
+        self.assertIn('placeholder="wymaga potwierdzenia"', source)
+        dialog = extract_method(source, "renderDialog(slots, touStarts)")
+        self.assertIn("this.touSocInput(entities.touSoc)", dialog)
+        self.assertNotIn("this.numberInput(entities.touSoc", dialog)
+
+    def test_mapping_distinguishes_charge_from_grid_permission(self):
+        source = self.sources[0]
+        self.assertIn("chargeMode: isCharge", source)
+        self.assertIn('item.chargeMode ? "Charge" : "Limit SOC"', source)
+
+    def test_charge_profile_save_uses_one_backend_service_only(self):
+        method = extract_method(self.sources[0], "async saveChargeProfile()")
+        self.assertEqual(method.count("this.callService("), 1)
+        self.assertIn(
+            'this.callService("deye_energy_manager", "save_charge_profile", values)',
+            method,
+        )
+        for forbidden in (
+            "number.set_value",
+            "switch.turn_on",
+            "switch.turn_off",
+            "select.select_option",
+            "setNumber(",
+            "turnSwitch(",
+            "setSelect(",
+        ):
+            self.assertNotIn(forbidden, method)
+
+    def test_charge_current_input_keeps_draft_and_physical_range_without_zero_fallback(self):
+        method = extract_method(self.sources[0], "chargeProfileInput(name, entityId, unit = \"\")")
+        for required in (
+            "this._chargeProfileDraft",
+            '["unknown", "unavailable"]',
+            "entity?.attributes?.min",
+            "entity?.attributes?.max",
+            "entity?.attributes?.step",
+            'type="number"',
+            'data-charge-profile-number=',
+            'range ? "" : "disabled"',
+        ):
+            self.assertIn(required, method)
+        for forbidden in ("?? 0", "|| 0", 'value="0"'):
+            self.assertNotIn(forbidden, method)
+
+    def test_charge_profile_draft_survives_input_change_and_rerender(self):
+        source = self.sources[0]
+        self.assertIn(
+            "this._chargeProfileDraft[el.dataset.chargeProfileNumber] = el.value",
+            source,
+        )
+        self.assertIn('el.addEventListener("input", saveDraft)', source)
+        self.assertIn('el.addEventListener("change", saveDraft)', source)
+        self.assertIn(
+            'this.chargeProfileInput("charge_current", this.entity("number", "charge_profile_charge_current"), "A")',
+            source,
+        )
+
+    def test_settings_menu_and_forms_follow_the_approved_layout(self):
+        source = self.sources[0]
+        dialog = extract_method(source, "renderDialog(slots, touStarts)")
+        self.assertIn('tabButton("defaults", "Ustawienia Tryb', dialog)
+        self.assertNotIn('tabButton("charge"', dialog)
+        defaults_heading = dialog.index("Ustawienia domy")
+        charge_heading = dialog.index("Ustawienia ", defaults_heading + 1)
+        self.assertGreater(charge_heading, defaults_heading)
+        self.assertIn("data-save-default-settings", dialog)
+        self.assertIn("data-save-charge-profile", dialog)
+
+    def test_default_and_charge_forms_have_independent_backend_calls(self):
+        default_method = extract_method(self.sources[0], "async saveDefaultSettings()")
+        charge_method = extract_method(self.sources[0], "async saveChargeProfile()")
+        self.assertIn('"save_default_settings"', default_method)
+        self.assertNotIn('"save_charge_profile"', default_method)
+        self.assertIn('"save_charge_profile"', charge_method)
+        self.assertNotIn('"save_default_settings"', charge_method)
+
+    def test_charge_slot_is_read_only_and_table_uses_shared_profile(self):
+        source = self.sources[0]
+        dialog = extract_method(source, "renderDialog(slots, touStarts)")
+        charge_start = dialog.index("const slotFields = isCharge ?")
+        non_charge_start = dialog.index(": `", charge_start)
+        charge_block = dialog[charge_start:non_charge_start]
+        for forbidden in ("numberInput(", "data-slot-grid-charge", "data-toggle="):
+            self.assertNotIn(forbidden, charge_block)
+        for required in (
+            "profile.chargeCurrent",
+            "profile.dischargeCurrent",
+            "profile.gridChargeCurrent",
+            "profile.targetSoc",
+            "isCharge ? chargeProfile.chargeCurrent",
+            "isCharge ? chargeProfile.gridChargeCurrent",
+            "isCharge ? chargeProfile.targetSoc",
+        ):
+            self.assertIn(required, source)
+
+    def test_settings_dialog_scrolls_on_desktop_tablet_and_phone(self):
+        source = self.sources[0]
+        self.assertIn(".settings-content{min-width:0;overflow:auto", source)
+        self.assertIn("@media(max-width:980px)", source)
+        self.assertIn(".settings-layout{grid-template-columns:1fr", source)
+        self.assertIn("@media(max-width:620px)", source)
+        self.assertIn(".settings-content{padding:9px}", source)
+
+    def test_diagnostics_show_logical_and_physical_soc_separately(self):
+        method = extract_method(self.sources[0], "renderDiagnostics(slots)")
+        for required in (
+            "active_slot_control",
+            "physical_tou",
+            "minimum_sell_soc",
+            "tou_soc",
+            "charge_profile_target_soc",
+            "effective_tou_soc",
+            "physical_soc_actual",
+            "grid_charge_expected",
+            "grid_charge_actual",
+            "currents",
+        ):
+            self.assertIn(required, method)
 
 
 if __name__ == "__main__":

@@ -26,7 +26,7 @@
 
 - Dodano usługę `apply_schedule_patch` do atomowych operacji zbiorczych.
 - Edycja zbiorcza i zastosowanie sugestii korzystają z jednej operacji backendowej.
-- Tryb `Charge` nie jest zgodą na Grid Charge; zgodę określa wyłącznie pole **Ładowanie z sieci** aktywnego slotu.
+- Tryb `Charge` nie jest zgodą na Grid Charge; jedyną zgodę określa pole **Ładowanie z sieci** we wspólnym profilu Charge.
 - Nieudana aktualizacja przywraca logiczną konfigurację slotów.
 
 ### Dane i konfiguracja
@@ -49,7 +49,10 @@
 ### Karta i UX
 
 - Pole statusu karty tłumaczy `SELL BLOCKED` jako **Sprzedaż zatrzymana**; pełna przyczyna pozostaje widoczna jako decyzja managera.
-- Obie dystrybuowane kopie karty mają identyczną zawartość i rewizję zasobu `v=0771`.
+- Rozdzielono `minimum_sell_soc` od fizycznego `tou_soc`: minimalny SOC jest wyłącznie warunkiem `Selling First`, a do Deye TOU trafia niezależny SOC slotu albo docelowy SOC wspólnego profilu Charge.
+- Migracja nie zastępuje brakującego fizycznego `tou_soc` minimalnym SOC sprzedaży ani `0`; wymagające potwierdzenia sloty blokują zapis mapowania przed pierwszą zmianą w Deye.
+- Edytor fizycznego Deye Time Of Use jest wyłącznie diagnostyczny; jedyną ścieżką zapisu pozostaje serializowana transakcja Harmonogramu sprzedaży.
+- Obie dystrybuowane kopie karty mają identyczną zawartość i rewizję zasobu `v=0772`.
 - Poprawiono zabezpieczanie dynamicznych wartości HTML.
 - Usunięto błędnie wyświetlane encje numeryczne HTML, m.in. w nazwie strategii „Zrównoważony”.
 - Dodano zakładkę `Taryfa i dystrybucja` z wyborem operatora, taryfy i trybu katalogu, jawnym przyciskiem zapisu, diagnostyką aktualizacji oraz profilem 48h dla dziś i jutra.

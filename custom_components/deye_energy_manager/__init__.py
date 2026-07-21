@@ -31,11 +31,13 @@ CHARGE_SCHEMA = vol.Schema(
 )
 AI_DATA_SCHEMA = vol.Schema({vol.Required("data"): vol.All(cv.string, vol.Length(max=200000))})
 AI_RATING_SCHEMA = vol.Schema({vol.Required("timestamp"): vol.Coerce(float), vol.Required("rating"): vol.All(vol.Coerce(int), vol.Range(min=1, max=5))})
-SLOT_GRID_CHARGE_SCHEMA = vol.Schema(
+DEFAULT_SETTINGS_SCHEMA = vol.Schema(
     {
-        vol.Required("slot_key"): cv.string,
-        vol.Required("enabled"): cv.boolean,
-        vol.Optional("grid_charge_current"): vol.All(vol.Coerce(float), vol.Range(min=0, max=240)),
+        vol.Required("mode"): vol.In(WORK_MODES),
+        vol.Required("sell_power"): vol.All(vol.Coerce(float), vol.Range(min=0, max=13000)),
+        vol.Required("discharge_current"): vol.All(vol.Coerce(float), vol.Range(min=0, max=240)),
+        vol.Required("charge_current"): vol.All(vol.Coerce(float), vol.Range(min=0, max=240)),
+        vol.Required("grid_charge_current"): vol.All(vol.Coerce(float), vol.Range(min=0, max=240)),
     }
 )
 SCHEDULE_PATCH_SCHEMA = vol.Schema(
@@ -46,6 +48,7 @@ TARIFF_SETTINGS_SCHEMA = vol.Schema(
 )
 CHARGE_PROFILE_SCHEMA = vol.Schema(
     {
+        vol.Required("grid_charge_enabled"): cv.boolean,
         vol.Required("charge_current"): vol.All(vol.Coerce(float), vol.Range(min=0, max=240)),
         vol.Required("discharge_current"): vol.All(vol.Coerce(float), vol.Range(min=0, max=240)),
         vol.Required("grid_charge_current"): vol.All(vol.Coerce(float), vol.Range(min=0, max=240)),
@@ -65,10 +68,10 @@ SERVICE_NAMES = (
     "clear_ai_history",
     "rate_ai_analysis",
     "clear_history",
-    "set_slot_grid_charge",
     "apply_schedule_patch",
     "save_tariff_settings",
     "save_charge_profile",
+    "save_default_settings",
     "refresh_tariff_catalog",
     "save_future_plan",
     "cancel_future_plan",
@@ -150,13 +153,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def handle_clear_history(call: ServiceCall) -> None:
         await runtime.async_clear_all_history()
 
-    async def handle_set_slot_grid_charge(call: ServiceCall) -> None:
-        slot_key = call.data["slot_key"]
-        update = {"slot_key": slot_key, "charge_enabled": call.data["enabled"]}
-        if "grid_charge_current" in call.data:
-            update["grid_charge_current"] = call.data["grid_charge_current"]
-        await runtime.async_apply_schedule_patch([update])
-
     async def handle_apply_schedule_patch(call: ServiceCall) -> None:
         updates = json.loads(call.data["data"])
         if not isinstance(updates, list):
@@ -173,6 +169,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     async def handle_save_charge_profile(call: ServiceCall) -> None:
         await runtime.async_save_charge_profile(dict(call.data))
+
+    async def handle_save_default_settings(call: ServiceCall) -> None:
+        await runtime.async_save_default_settings(dict(call.data))
 
     async def handle_refresh_tariff_catalog(call: ServiceCall) -> None:
         await runtime.async_refresh_tariff_catalog()
@@ -200,12 +199,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.services.async_register(DOMAIN, "clear_history", handle_clear_history)
     hass.services.async_register(
         DOMAIN,
-        "set_slot_grid_charge",
-        handle_set_slot_grid_charge,
-        schema=SLOT_GRID_CHARGE_SCHEMA,
-    )
-    hass.services.async_register(
-        DOMAIN,
         "apply_schedule_patch",
         handle_apply_schedule_patch,
         schema=SCHEDULE_PATCH_SCHEMA,
@@ -221,6 +214,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "save_charge_profile",
         handle_save_charge_profile,
         schema=CHARGE_PROFILE_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        "save_default_settings",
+        handle_save_default_settings,
+        schema=DEFAULT_SETTINGS_SCHEMA,
     )
     hass.services.async_register(
         DOMAIN,

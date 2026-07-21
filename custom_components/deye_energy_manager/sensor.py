@@ -143,14 +143,20 @@ def weather_attrs(runtime):
 
 def manager_status_attrs(runtime):
     return {
-        "slot_grid_charge": {
+        "charge_profile": {
+            "grid_charge_enabled": bool(runtime.charge_profile_grid_enabled),
+            "charge_current": round(runtime.charge_profile_charge_current, 2),
+            "discharge_current": round(runtime.charge_profile_discharge_current, 2),
+            "grid_charge_current": round(runtime.charge_profile_grid_charge_current, 2),
+            "target_soc": round(runtime.charge_profile_target_soc, 1),
+        },
+        "slot_soc": {
             key: {
-                "enabled": bool(slot.charge_enabled),
-                "grid_charge_current": round(slot.grid_charge_current, 2),
                 "minimum_sell_soc": round(slot.minimum_sell_soc, 1),
+                "tou_soc": None if slot.tou_soc is None else round(slot.tou_soc, 1),
             }
             for key, slot in runtime.slots.items()
-        }
+        },
     }
 
 
