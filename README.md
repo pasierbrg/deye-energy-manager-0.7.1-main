@@ -137,7 +137,7 @@ Po instalacji mapowanie można zmienić przez **Ustawienia → Urządzenia i us�
 Integracja udostępnia kartę pod adresem:
 
 ```text
-/deye_energy_manager/deye-energy-manager-card.js?v=0774
+/deye_energy_manager/deye-energy-manager-card.js?v=0775
 ```
 
 Jeżeli karta jest instalowana ręcznie, skopiuj:
@@ -149,10 +149,10 @@ www/deye-energy-manager-card.js
 do `/config/www/` i dodaj zasób:
 
 ```text
-/local/deye-energy-manager-card.js?v=0774
+/local/deye-energy-manager-card.js?v=0775
 ```
 
-Po podmianie pliku karty ustaw parametr `v=0774`, przeładuj zasoby Lovelace i wykonaj twarde odświeżenie przeglądarki (`Ctrl + F5`). `0774` jest aktualną rewizją karty wydania 0.7.6. Dla karty udostępnianej przez integrację używaj adresu `/deye_energy_manager/...`; adres `/local/...` jest przeznaczony wyłącznie dla pliku skopiowanego ręcznie do `/config/www/`.
+Po podmianie pliku karty ustaw parametr `v=0775`, przeładuj zasoby Lovelace i wykonaj twarde odświeżenie przeglądarki (`Ctrl + F5`). `0775` jest aktualną rewizją karty wydania 0.7.6. Dla karty udostępnianej przez integrację używaj adresu `/deye_energy_manager/...`; adres `/local/...` jest przeznaczony wyłącznie dla pliku skopiowanego ręcznie do `/config/www/`.
 
 Konfiguracja karty:
 
@@ -166,7 +166,7 @@ Przykład kompletnego dashboardu znajduje się w `dashboard/energy_manager.yaml`
 
 - Brakujący albo nieprawidłowy odczyt SOC lub ceny jest błędem tylko wtedy, gdy aktywny slot `Selling First` wymaga minimalnego SOC albo minimalnej ceny sprzedaży. Prawidłowy odczyt poniżej progu jedynie wstrzymuje sprzedaż komunikatem warunkowym — bez `SCHEDULE APPLY ERROR`, bez ponawiania zapisu i bez blokowania slotów `Zero Export`.
 - Aktualizacja ustawień zapisuje i potwierdza wartości liczbowe przed ustawieniem docelowego trybu falownika; integracja nie zastępuje wybranego trybu innym.
-- Falownik może publikować nowy stan z opóźnieniem: po pojedynczym zapisie integracja nasłuchuje zmian encji Deye i wykonuje odczyt kontrolny co kilka sekund, maksymalnie przez 90 sekund. Nie ponawia tej samej transakcji ani nie wraca przedwcześnie do ustawień domyślnych.
+- Falownik może publikować nowy stan z opóźnieniem: po pojedynczym zapisie integracja nasłuchuje zmian encji Deye i wykonuje odczyt kontrolny po 1, 2 i 4 sekundach, maksymalnie przez 30 sekund. Nie ponawia tej samej transakcji ani nie wraca przedwcześnie do ustawień domyślnych.
 - Mapowanie ponad 6 zakresów nie jest zapisywane do Deye.
 - Ustawienia zapisane w sekcji **Ustawienia Trybów → Ustawienia domyślne dla falownika** są stanem powrotu po zatrzymaniu lub błędzie.
 - Stop Sell, zatrzymanie awaryjne, brakujący lub nieprawidłowy odczyt wymagany przez aktywny slot, błąd mapowania i błąd zapisu stosują 1:1 domyślny tryb, domyślną moc oraz trzy domyślne prądy użytkownika. Prawidłowy SOC lub cena poniżej progu sprzedaży są normalnym warunkiem wstrzymania sprzedaży, nie błędem. Integracja nie zapisuje automatycznie wartości `0`, chyba że użytkownik sam zapisał ją jako domyślną.
@@ -174,7 +174,7 @@ Przykład kompletnego dashboardu znajduje się w `dashboard/energy_manager.yaml`
 - Stop Sell i zatrzymanie awaryjne zatrzaskują sterowanie managera do świadomego wznowienia oraz stosują pełny zestaw ustawień domyślnych użytkownika.
 - W **System i diagnostyka** przycisk **Włącz Manager i harmonogram** świadomie przywraca tryb `Schedule` i włącza Scheduler. Nie zmienia szablonu Charge ani parametrów slotów: Deye Grid Charge może włączyć wyłącznie **Ładowanie z sieci: TAK** zapisane w aktywnym slocie `Charge`. Diagnostyka pokazuje ostatnią próbę zastosowania slotu, wartości oczekiwane i odczytane oraz stan encji Deye Time Of Use.
 - W oknie pojedynczego slotu widoczne jest jedno pole SOC właściwe dla wybranego trybu: **Minimalny SOC sprzedaży** dla `Selling First`, **SOC baterii Deye (TOU)** dla trybów Zero Export oraz **Docelowy SOC** dla `Charge`. W logice integracji minimalny SOC sprzedaży pozostaje niezależny od fizycznego SOC Deye TOU.
-- **Ustawienia ładowania** są szablonem kopiowanym jednorazowo do slotu po wybraniu `Charge`. Użytkownik może później zmienić prądy, docelowy SOC i zgodę **Ładowanie z sieci** dla tej godziny; ponowny zapis szablonu nie nadpisuje istniejących slotów Charge.
+- **Ustawienia ładowania** są szablonem kopiowanym jednorazowo do slotu po wybraniu `Charge`. Użytkownik może później zmienić prądy, docelowy SOC i zgodę **Ładowanie z sieci** dla tej godziny; ponowny zapis szablonu nie nadpisuje istniejących slotów Charge. Formularz odtwarza cały zapisany profil także wtedy, gdy pomocnicza encja nie opublikowała jeszcze stanu, a tabela harmonogramu zawsze pokazuje zgodę jako **TAK** albo **NIE**.
 - Zakładka **Deye Time Of Use** pozwala również na świadomą, bezpośrednią edycję sześciu fizycznych zakresów. Ponowne zastosowanie mapowania harmonogramu może je nadpisać.
 - Po migracji zachowany jest wcześniej zapisany SOC TOU. Gdy nie można go wiarygodnie odtworzyć, pole jest oznaczone jako **wymaga potwierdzenia**; integracja nie podstawia w jego miejsce ani minimalnego SOC sprzedaży, ani wartości `0` i nie zapisuje wtedy mapowania TOU.
 - Ustawienia można ręcznie przywrócić przyciskiem **Zastosuj ustawienia domyślne teraz**.

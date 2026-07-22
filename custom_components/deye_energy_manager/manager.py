@@ -202,7 +202,7 @@ class DeyeEnergyManagerRuntime:
     last_saved_at: str = ""
     last_error: str = ""
     last_schedule_attempt: dict[str, Any] = field(default_factory=dict)
-    control_confirmation_timeout: float = 90.0
+    control_confirmation_timeout: float = 30.0
     _pending_control_transaction: dict[str, Any] = field(default_factory=dict)
     unsub_confirmation_timer: Any = None
     unsub_confirmation_listener: Any = None
@@ -2507,7 +2507,7 @@ class DeyeEnergyManagerRuntime:
     ) -> bool | None:
         """Confirm an in-flight write, or leave it pending without re-writing.
 
-        ``True`` means confirmed, ``False`` means the 90-second confirmation
+        ``True`` means confirmed, ``False`` means the 30-second confirmation
         window expired and defaults were restored, and ``None`` means that the
         caller must perform the first write.
         """

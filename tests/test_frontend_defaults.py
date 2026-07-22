@@ -126,7 +126,8 @@ class FrontendDefaultRestoreTests(unittest.TestCase):
     def test_documentation_uses_current_card_cache_revision(self):
         for name in ("README.md", "INSTALL_PL.md"):
             source = (ROOT / name).read_text(encoding="utf-8")
-            self.assertIn("deye-energy-manager-card.js?v=0774", source)
+            self.assertIn("deye-energy-manager-card.js?v=0775", source)
+            self.assertNotIn("deye-energy-manager-card.js?v=0774", source)
             self.assertNotIn("deye-energy-manager-card.js?v=0773", source)
             self.assertNotIn("deye-energy-manager-card.js?v=0772", source)
             self.assertNotIn("deye-energy-manager-card.js?v=0765", source)
@@ -206,6 +207,16 @@ class FrontendDefaultRestoreTests(unittest.TestCase):
             source,
         )
 
+    def test_charge_profile_form_falls_back_to_persisted_manager_status(self):
+        source = self.sources[0]
+        self.assertIn('this.entity("sensor", "manager_status")', source)
+        self.assertIn("attributes?.charge_profile", source)
+        self.assertIn("this.chargeProfileStoredValues()[profileKey]", source)
+        self.assertIn(
+            "this.chargeProfileStoredValues().grid_charge_enabled",
+            source,
+        )
+
     def test_settings_menu_and_forms_follow_the_approved_layout(self):
         source = self.sources[0]
         dialog = extract_method(source, "renderDialog(slots, touStarts)")
@@ -255,7 +266,8 @@ class FrontendDefaultRestoreTests(unittest.TestCase):
 
     def test_schedule_table_always_displays_stored_grid_permission_and_current(self):
         source = self.sources[0]
-        self.assertIn('gridCharge ? "TAK" : "NIE"', source)
+        self.assertIn('const gridChargeLabel = gridCharge ? "TAK" : "NIE"', source)
+        self.assertIn("this.pill(null, gridChargeLabel)", source)
         self.assertIn("${gridChargeCurrent} A", source)
         self.assertNotIn(
             'isCharge ? (slot.chargeEnabled === "on" ? "tak" : "nie") : "nie dotyczy"',

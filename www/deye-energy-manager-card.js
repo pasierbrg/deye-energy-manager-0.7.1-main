@@ -902,17 +902,34 @@ class DeyeEnergyManagerCard extends HTMLElement {
     };
   }
 
+  chargeProfileStoredValues() {
+    const statusId = this.entity("sensor", "manager_status");
+    const profile = this._hass?.states?.[statusId]?.attributes?.charge_profile;
+    return profile && typeof profile === "object" ? profile : {};
+  }
+
+  chargeProfileNumericValue(entitySuffix, profileKey) {
+    const entityId = this.entity("number", entitySuffix);
+    const state = this.displayState(entityId, "");
+    const known = state && !["unknown", "unavailable", "None", "null"].includes(state);
+    if (known) return state;
+    const stored = this.chargeProfileStoredValues()[profileKey];
+    return Number.isFinite(Number(stored)) ? String(stored) : "brak";
+  }
+
   chargeProfileGridEnabled() {
     if (typeof this._chargeProfileGridDraft === "boolean") return this._chargeProfileGridDraft;
-    return this.displayState(this.entity("switch", "charge_profile_grid_enabled"), "off") === "on";
+    const state = this.displayState(this.entity("switch", "charge_profile_grid_enabled"), "");
+    if (state === "on" || state === "off") return state === "on";
+    return Boolean(this.chargeProfileStoredValues().grid_charge_enabled);
   }
 
   chargeProfileValues() {
     return {
-      chargeCurrent: this.numberState(this.entity("number", "charge_profile_charge_current"), "brak"),
-      dischargeCurrent: this.numberState(this.entity("number", "charge_profile_discharge_current"), "brak"),
-      gridChargeCurrent: this.numberState(this.entity("number", "charge_profile_grid_charge_current"), "brak"),
-      targetSoc: this.numberState(this.entity("number", "charge_profile_target_soc"), "brak"),
+      chargeCurrent: this.chargeProfileNumericValue("charge_profile_charge_current", "charge_current"),
+      dischargeCurrent: this.chargeProfileNumericValue("charge_profile_discharge_current", "discharge_current"),
+      gridChargeCurrent: this.chargeProfileNumericValue("charge_profile_grid_charge_current", "grid_charge_current"),
+      targetSoc: this.chargeProfileNumericValue("charge_profile_target_soc", "target_soc"),
       gridEnabled: this.chargeProfileGridEnabled(),
     };
   }
@@ -3401,7 +3418,9 @@ class DeyeEnergyManagerCard extends HTMLElement {
       const entities = this.slotEntities(key, label);
       const enabled = this.displayState(entities.sellEnabled) === "on";
       const mode = this.state(entities.mode, "Zero Export To Load");
-      const gridCharge = this.displayState(entities.chargeEnabled, "off") === "on";
+      const gridChargeState = this.displayState(entities.chargeEnabled, "");
+      const gridCharge = gridChargeState === "on";
+      const gridChargeLabel = gridCharge ? "TAK" : "NIE";
       const chargeCurrent = this.numberState(entities.chargeCurrent);
       const gridChargeCurrent = this.numberState(entities.gridChargeCurrent);
       const touSoc = mode === "Selling First" ? this.numberState(entities.minimumSellSoc) : this.numberState(entities.touSoc, "wymaga potwierdzenia");
@@ -3419,7 +3438,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
         <td data-label="Moc sprzedaży" class="metric sell">${enabled ? `${this.iconSvg("sell")} ${this.numberState(entities.sellPower)} W` : "-"}</td>
         <td data-label="Prąd rozładowania" class="metric discharge">${enabled ? `↓ ${this.numberState(entities.dischargeCurrent)} A` : "-"}</td>
         <td data-label="Prąd ładowania" class="metric charge">${enabled ? `↑ ${chargeCurrent} A` : "-"}</td>
-        <td data-label="Ładowanie z sieci" class="metric grid">${enabled ? this.pill(null, gridCharge ? "TAK" : "NIE") : "-"}</td>
+        <td data-label="Ładowanie z sieci" class="metric grid">${enabled ? this.pill(null, gridChargeLabel) : "-"}</td>
         <td data-label="Prąd ładowania z sieci" class="metric grid-current">${enabled ? `⚡ ${gridChargeCurrent} A` : "-"}</td>
         <td data-label="SOC" class="metric soc">${enabled ? `◇ ${touSoc}%` : "-"}</td>
         <td data-label="Cena min." class="metric price-limit">${enabled ? `${this.formatPrice(this.numberState(entities.minSellPrice))} PLN` : "-"}</td>

@@ -15,7 +15,7 @@
 - Błąd mapowania ponad 6 zakresów zatrzymuje operację i stosuje 1:1 pełne ustawienia domyślne użytkownika.
 - Dodano zakresy walidacji dla mocy, prądów, SOC i cen.
 - Zatrzymanie awaryjne przełącza sterowanie w zatrzaśnięty tryb `Stop Sell`.
-- Dla zapisu aktywnego slotu dodano nasłuchiwanie zmian encji Deye oraz szybkie odczyty kontrolne po 1, 2 i 4 sekundach, z limitem oczekiwania 90 sekund. W tym czasie transakcja nie jest ponawiana, ustawienia domyślne nie są przedwcześnie przywracane, a diagnostyka pokazuje etap oraz wartości oczekiwane i odczytane.
+- Dla zapisu aktywnego slotu dodano nasłuchiwanie zmian encji Deye oraz szybkie odczyty kontrolne po 1, 2 i 4 sekundach, z limitem oczekiwania 30 sekund. W tym czasie transakcja nie jest ponawiana, ustawienia domyślne nie są przedwcześnie przywracane, a diagnostyka pokazuje etap oraz wartości oczekiwane i odczytane.
 - Dodano walidację fizycznych encji Deye Time Of Use oraz świadomy przycisk/usługę `resume_manager` („Włącz Manager i harmonogram”). Włącza `Schedule` i Scheduler, lecz nie zmienia flagi `Grid` w żadnym slocie.
 - Pole **Ładowanie z sieci** jest jedyną zgodą na Deye Grid Charge: wartość `nie` zawsze zapisuje wyłączony Grid Charge, także w trybie `Charge`; `charge_current` pozostaje limitem całkowitego ładowania baterii, a `grid_charge_current` limitem ładowania z sieci.
 - **Ustawienia ładowania** działają jako szablon kopiowany przy wyborze trybu `Charge`. Każdy slot zachowuje późniejsze ręczne zmiany prądów, docelowego SOC oraz zgody na ładowanie z sieci; ponowny zapis szablonu nie nadpisuje istniejących slotów.
@@ -35,7 +35,7 @@
 
 ### Dane i konfiguracja
 
-- Profil **Ustawienia ładowania** jest zapisywany jako jeden atomowy rekord i odtwarzany w całości po zamknięciu karty oraz restarcie Home Assistant. Błąd walidacji lub zapisu zachowuje ostatni poprawny profil.
+- Profil **Ustawienia ładowania** jest zapisywany jako jeden atomowy rekord i odtwarzany w całości po zamknięciu karty oraz restarcie Home Assistant. Formularz ma awaryjny odczyt zapisanego profilu z atrybutów statusu managera, jeśli pomocnicza encja nie opublikowała jeszcze stanu. Błąd walidacji lub zapisu zachowuje ostatni poprawny profil.
 - Dodano Options Flow do późniejszej zmiany mapowania encji.
 - Dodano konfigurowalne sensory mocy PV, domu i baterii.
 - Bieżący dzień pokazuje realizację prognozy; trafność jest liczona po zamknięciu dnia.
@@ -57,7 +57,8 @@
 - Rozdzielono `minimum_sell_soc` od fizycznego `tou_soc`: minimalny SOC jest wyłącznie warunkiem `Selling First`, a do Deye TOU trafia niezależny SOC zapisany w konkretnym slocie, w tym docelowy SOC slotu `Charge`.
 - Migracja nie zastępuje brakującego fizycznego `tou_soc` minimalnym SOC sprzedaży ani `0`; wymagające potwierdzenia sloty blokują zapis mapowania przed pierwszą zmianą w Deye.
 - Przywrócono świadomą, bezpośrednią edycję fizycznego Deye Time Of Use. Karta ostrzega, że późniejsze zastosowanie mapowania Harmonogramu sprzedaży może nadpisać te wartości.
-- Obie dystrybuowane kopie karty mają identyczną zawartość i rewizję zasobu `v=0774`.
+- Tabela harmonogramu pokazuje zgodę **Ładowanie z sieci** jako jednoznaczne **TAK** albo **NIE**, również podczas opóźnionej publikacji stanu encji.
+- Obie dystrybuowane kopie karty mają identyczną zawartość i rewizję zasobu `v=0775`.
 - Poprawiono zabezpieczanie dynamicznych wartości HTML.
 - Usunięto błędnie wyświetlane encje numeryczne HTML, m.in. w nazwie strategii „Zrównoważony”.
 - Dodano zakładkę `Taryfa i dystrybucja` z wyborem operatora, taryfy i trybu katalogu, jawnym przyciskiem zapisu, diagnostyką aktualizacji oraz profilem 48h dla dziś i jutra.

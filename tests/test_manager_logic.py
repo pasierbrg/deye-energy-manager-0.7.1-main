@@ -219,6 +219,9 @@ def control_number_calls(runtime):
 
 
 class SafetyTests(unittest.TestCase):
+    def test_default_control_confirmation_window_is_30_seconds(self):
+        self.assertEqual(make_runtime().control_confirmation_timeout, 30.0)
+
     def test_missing_soc_blocks_selling(self):
         runtime = make_runtime(soc=None)
         self.assertTrue(runtime.data_available)
