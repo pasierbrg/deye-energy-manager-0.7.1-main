@@ -202,7 +202,7 @@ class DeyeEnergyManagerRuntime:
     last_saved_at: str = ""
     last_error: str = ""
     last_schedule_attempt: dict[str, Any] = field(default_factory=dict)
-    control_confirmation_timeout: float = 30.0
+    control_confirmation_timeout: float = 12.0
     _pending_control_transaction: dict[str, Any] = field(default_factory=dict)
     unsub_confirmation_timer: Any = None
     unsub_confirmation_listener: Any = None
@@ -2439,7 +2439,7 @@ class DeyeEnergyManagerRuntime:
             # State changes are the preferred confirmation mechanism.  These
             # short read-only checks are a fallback for late Deye updates.
             poll_index = int(self._pending_control_transaction.get("poll_index", 0))
-            delay = (1.0, 2.0, 4.0)[min(poll_index, 2)]
+            delay = (0.5, 1.0, 2.0)[min(poll_index, 2)]
             self._pending_control_transaction["poll_index"] = poll_index + 1
 
         @callback
@@ -2507,7 +2507,7 @@ class DeyeEnergyManagerRuntime:
     ) -> bool | None:
         """Confirm an in-flight write, or leave it pending without re-writing.
 
-        ``True`` means confirmed, ``False`` means the 30-second confirmation
+        ``True`` means confirmed, ``False`` means the 12-second confirmation
         window expired and defaults were restored, and ``None`` means that the
         caller must perform the first write.
         """

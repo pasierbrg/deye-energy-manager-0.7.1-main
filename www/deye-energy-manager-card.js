@@ -3420,7 +3420,9 @@ class DeyeEnergyManagerCard extends HTMLElement {
       const mode = this.state(entities.mode, "Zero Export To Load");
       const gridChargeState = this.displayState(entities.chargeEnabled, "");
       const gridCharge = gridChargeState === "on";
-      const gridChargeLabel = gridCharge ? "TAK" : "NIE";
+      const isChargeMode = mode === "Charge";
+      const gridChargeLabel = isChargeMode ? (gridCharge ? "tak" : "nie") : "nie dotyczy";
+      const gridChargeClass = isChargeMode ? (gridCharge ? "on" : "off") : "missing";
       const chargeCurrent = this.numberState(entities.chargeCurrent);
       const gridChargeCurrent = this.numberState(entities.gridChargeCurrent);
       const touSoc = mode === "Selling First" ? this.numberState(entities.minimumSellSoc) : this.numberState(entities.touSoc, "wymaga potwierdzenia");
@@ -3438,7 +3440,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
         <td data-label="Moc sprzedaży" class="metric sell">${enabled ? `${this.iconSvg("sell")} ${this.numberState(entities.sellPower)} W` : "-"}</td>
         <td data-label="Prąd rozładowania" class="metric discharge">${enabled ? `↓ ${this.numberState(entities.dischargeCurrent)} A` : "-"}</td>
         <td data-label="Prąd ładowania" class="metric charge">${enabled ? `↑ ${chargeCurrent} A` : "-"}</td>
-        <td data-label="Ładowanie z sieci" class="metric grid">${enabled ? this.pill(null, gridChargeLabel) : "-"}</td>
+        <td data-label="Ładowanie z sieci" class="metric grid">${enabled ? `<span class="pill ${gridChargeClass}">${gridChargeLabel}</span>` : "-"}</td>
         <td data-label="Prąd ładowania z sieci" class="metric grid-current">${enabled ? `⚡ ${gridChargeCurrent} A` : "-"}</td>
         <td data-label="SOC" class="metric soc">${enabled ? `◇ ${touSoc}%` : "-"}</td>
         <td data-label="Cena min." class="metric price-limit">${enabled ? `${this.formatPrice(this.numberState(entities.minSellPrice))} PLN` : "-"}</td>

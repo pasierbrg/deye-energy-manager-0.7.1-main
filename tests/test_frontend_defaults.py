@@ -126,7 +126,7 @@ class FrontendDefaultRestoreTests(unittest.TestCase):
     def test_documentation_uses_current_card_cache_revision(self):
         for name in ("README.md", "INSTALL_PL.md"):
             source = (ROOT / name).read_text(encoding="utf-8")
-            self.assertIn("deye-energy-manager-card.js?v=0775", source)
+            self.assertIn("deye-energy-manager-card.js?v=0776", source)
             self.assertNotIn("deye-energy-manager-card.js?v=0774", source)
             self.assertNotIn("deye-energy-manager-card.js?v=0773", source)
             self.assertNotIn("deye-energy-manager-card.js?v=0772", source)
@@ -266,8 +266,9 @@ class FrontendDefaultRestoreTests(unittest.TestCase):
 
     def test_schedule_table_always_displays_stored_grid_permission_and_current(self):
         source = self.sources[0]
-        self.assertIn('const gridChargeLabel = gridCharge ? "TAK" : "NIE"', source)
-        self.assertIn("this.pill(null, gridChargeLabel)", source)
+        self.assertIn('const gridChargeLabel = isChargeMode ? (gridCharge ? "tak" : "nie") : "nie dotyczy"', source)
+        self.assertIn('class="pill ${gridChargeClass}"', source)
+        self.assertNotIn("this.pill(null, gridChargeLabel)", source)
         self.assertIn("${gridChargeCurrent} A", source)
         self.assertNotIn(
             'isCharge ? (slot.chargeEnabled === "on" ? "tak" : "nie") : "nie dotyczy"',
