@@ -126,7 +126,8 @@ class FrontendDefaultRestoreTests(unittest.TestCase):
     def test_documentation_uses_current_card_cache_revision(self):
         for name in ("README.md", "INSTALL_PL.md"):
             source = (ROOT / name).read_text(encoding="utf-8")
-            self.assertIn("deye-energy-manager-card.js?v=0778", source)
+            self.assertIn("deye-energy-manager-card.js?v=0779", source)
+            self.assertNotIn("deye-energy-manager-card.js?v=0778", source)
             self.assertNotIn("deye-energy-manager-card.js?v=0777", source)
             self.assertNotIn("deye-energy-manager-card.js?v=0774", source)
             self.assertNotIn("deye-energy-manager-card.js?v=0773", source)
@@ -231,7 +232,9 @@ class FrontendDefaultRestoreTests(unittest.TestCase):
     def test_normal_profile_input_allows_editing_when_entity_state_is_empty(self):
         method = extract_method(self.sources[0], "normalProfileInput(name, entityId, unit = \"\")")
         self.assertNotIn("current !== \"\"", method)
-        self.assertIn("this.exists(entityId) && range", method)
+        self.assertNotIn("disabled", method)
+        self.assertIn("fallback", method)
+        self.assertIn('name === "tou_soc"', method)
 
     def test_normal_profile_section_uses_minimum_soc_label(self):
         source = self.sources[0]
