@@ -1,6 +1,8 @@
 from __future__ import annotations
+
 from pathlib import Path
 import unittest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 CARD_PATHS = (
@@ -80,6 +82,7 @@ class FrontendDefaultRestoreTests(unittest.TestCase):
         method = extract_method(self.sources[0], "async stopManager()")
         self.assertIn("return this.applyDefaultValues()", method)
         self.assertNotIn("callService", method)
+
 
     def test_resume_manager_uses_dedicated_backend_service(self):
         method = extract_method(self.sources[0], "async resumeManager()")
@@ -177,7 +180,7 @@ class FrontendDefaultRestoreTests(unittest.TestCase):
         self.assertIn("this._chargeProfileGridDraft = null", method)
 
     def test_charge_current_input_keeps_draft_and_physical_range_without_zero_fallback(self):
-        method = extract_method(self.sources[0], 'chargeProfileInput(name, entityId, unit = "")')
+        method = extract_method(self.sources[0], "chargeProfileInput(name, entityId, unit = \"\")")
         for required in (
             "this._chargeProfileDraft",
             '["unknown", "unavailable", ""]',
@@ -227,8 +230,8 @@ class FrontendDefaultRestoreTests(unittest.TestCase):
         self.assertIn("tou_soc", method)
 
     def test_normal_profile_input_allows_editing_when_entity_state_is_empty(self):
-        method = extract_method(self.sources[0], 'normalProfileInput(name, entityId, unit = "")')
-        self.assertNotIn('current !== ""', method)
+        method = extract_method(self.sources[0], "normalProfileInput(name, entityId, unit = \"\")")
+        self.assertNotIn("current !== \"\"", method)
         self.assertNotIn("disabled", method)
         self.assertIn("fallback", method)
         self.assertIn('name === "tou_soc"', method)
@@ -237,7 +240,7 @@ class FrontendDefaultRestoreTests(unittest.TestCase):
         source = self.sources[0]
         dialog = extract_method(source, "renderDialog(slots, touStarts)")
         start = dialog.index("Ustawienia normalnej pracy")
-        end = dialog.index('} else if (tab === "tou")', start)
+        end = dialog.index("} else if (tab === \"tou\")", start)
         normal_section = dialog[start:end]
         self.assertIn('this.row("Minimalny SOC"', normal_section)
         self.assertNotIn('this.row("SOC baterii Deye (TOU)"', normal_section)
@@ -246,10 +249,10 @@ class FrontendDefaultRestoreTests(unittest.TestCase):
         source = self.sources[0]
         method = extract_method(source, "async reloadNormalProfileSlot(slotKey)")
         self.assertIn('"apply_schedule_patch"', method)
-        self.assertIn("force_copy_normal_profile: true", method)
+        self.assertIn('force_copy_normal_profile: true', method)
         self.assertIn('"Normalna Praca"', method)
         self.assertIn(
-            "this.reloadNormalProfileSlot(el.dataset.reloadNormalProfile)",
+            'this.reloadNormalProfileSlot(el.dataset.reloadNormalProfile)',
             source,
         )
 
@@ -303,10 +306,7 @@ class FrontendDefaultRestoreTests(unittest.TestCase):
 
     def test_schedule_table_always_displays_stored_grid_permission_and_current(self):
         source = self.sources[0]
-        self.assertIn(
-            'const gridChargeLabel = isChargeMode ? (gridCharge ? "tak" : "nie") : "nie dotyczy"',
-            source,
-        )
+        self.assertIn('const gridChargeLabel = isChargeMode ? (gridCharge ? "tak" : "nie") : "nie dotyczy"', source)
         self.assertIn('class="pill ${gridChargeClass}"', source)
         self.assertNotIn("this.pill(null, gridChargeLabel)", source)
         self.assertIn("${gridChargeCurrent} A", source)
