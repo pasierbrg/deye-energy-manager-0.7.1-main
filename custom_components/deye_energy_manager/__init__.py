@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
 from pathlib import Path
 
-from .const import DOMAIN, PLATFORMS, WORK_MODES
+from .const import DOMAIN, PLATFORMS, WORK_MODES, PHYSICAL_NORMAL_MODES
 from .manager import DeyeEnergyManagerRuntime
 
 APPLY_SCHEMA = vol.Schema(
@@ -55,6 +55,16 @@ CHARGE_PROFILE_SCHEMA = vol.Schema(
         vol.Required("target_soc"): vol.All(vol.Coerce(float), vol.Range(min=0, max=100)),
     }
 )
+NORMAL_PROFILE_SCHEMA = vol.Schema(
+    {
+        vol.Required("physical_work_mode"): vol.In(list(PHYSICAL_NORMAL_MODES)),
+        vol.Required("sell_power"): vol.All(vol.Coerce(float), vol.Range(min=0, max=13000)),
+        vol.Required("discharge_current"): vol.All(vol.Coerce(float), vol.Range(min=0, max=240)),
+        vol.Required("charge_current"): vol.All(vol.Coerce(float), vol.Range(min=0, max=240)),
+        vol.Required("grid_charge_current"): vol.All(vol.Coerce(float), vol.Range(min=0, max=240)),
+        vol.Required("tou_soc"): vol.All(vol.Coerce(float), vol.Range(min=0, max=100)),
+    }
+)
 SERVICE_NAMES = (
     "apply_settings",
     "manual_sell",
@@ -71,6 +81,7 @@ SERVICE_NAMES = (
     "apply_schedule_patch",
     "save_tariff_settings",
     "save_charge_profile",
+    "save_normal_profile",
     "save_default_settings",
     "refresh_tariff_catalog",
     "save_future_plan",
@@ -170,6 +181,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def handle_save_charge_profile(call: ServiceCall) -> None:
         await runtime.async_save_charge_profile(dict(call.data))
 
+    async def handle_save_normal_profile(call: ServiceCall) -> None:
+        await runtime.async_save_normal_profile(dict(call.data))
+
     async def handle_save_default_settings(call: ServiceCall) -> None:
         await runtime.async_save_default_settings(dict(call.data))
 
@@ -214,6 +228,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "save_charge_profile",
         handle_save_charge_profile,
         schema=CHARGE_PROFILE_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        "save_normal_profile",
+        handle_save_normal_profile,
+        schema=NORMAL_PROFILE_SCHEMA,
     )
     hass.services.async_register(
         DOMAIN,

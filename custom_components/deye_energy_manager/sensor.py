@@ -150,6 +150,14 @@ def manager_status_attrs(runtime):
             "grid_charge_current": round(runtime.charge_profile_grid_charge_current, 2),
             "target_soc": round(runtime.charge_profile_target_soc, 1),
         },
+        "normal_profile": {
+            "physical_work_mode": runtime.normal_profile_physical_work_mode,
+            "sell_power": round(runtime.normal_profile_sell_power, 1),
+            "discharge_current": round(runtime.normal_profile_discharge_current, 1),
+            "charge_current": round(runtime.normal_profile_charge_current, 1),
+            "grid_charge_current": round(runtime.normal_profile_grid_charge_current, 1),
+            "tou_soc": None if runtime.normal_profile_tou_soc is None else round(runtime.normal_profile_tou_soc, 1),
+        },
         "slot_soc": {
             key: {
                 "minimum_sell_soc": round(slot.minimum_sell_soc, 1),

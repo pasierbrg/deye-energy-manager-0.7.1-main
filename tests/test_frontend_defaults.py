@@ -126,7 +126,7 @@ class FrontendDefaultRestoreTests(unittest.TestCase):
     def test_documentation_uses_current_card_cache_revision(self):
         for name in ("README.md", "INSTALL_PL.md"):
             source = (ROOT / name).read_text(encoding="utf-8")
-            self.assertIn("deye-energy-manager-card.js?v=0776", source)
+            self.assertIn("deye-energy-manager-card.js?v=0777", source)
             self.assertNotIn("deye-energy-manager-card.js?v=0774", source)
             self.assertNotIn("deye-energy-manager-card.js?v=0773", source)
             self.assertNotIn("deye-energy-manager-card.js?v=0772", source)
@@ -217,6 +217,27 @@ class FrontendDefaultRestoreTests(unittest.TestCase):
             source,
         )
 
+    def test_normal_profile_form_uses_dedicated_backend_service(self):
+        method = extract_method(self.sources[0], "async saveNormalProfile()")
+        self.assertEqual(method.count("this.callService("), 1)
+        self.assertIn(
+            'this.callService("deye_energy_manager", "save_normal_profile", values)',
+            method,
+        )
+        self.assertIn("physical_work_mode", method)
+        self.assertIn("tou_soc", method)
+
+    def test_normal_profile_reload_button_calls_apply_schedule_patch_with_force_flag(self):
+        source = self.sources[0]
+        method = extract_method(source, "async reloadNormalProfileSlot(slotKey)")
+        self.assertIn('"apply_schedule_patch"', method)
+        self.assertIn('force_copy_normal_profile: true', method)
+        self.assertIn('"Normalna Praca"', method)
+        self.assertIn(
+            'this.reloadNormalProfileSlot(el.dataset.reloadNormalProfile)',
+            source,
+        )
+
     def test_settings_menu_and_forms_follow_the_approved_layout(self):
         source = self.sources[0]
         dialog = extract_method(source, "renderDialog(slots, touStarts)")
@@ -254,15 +275,16 @@ class FrontendDefaultRestoreTests(unittest.TestCase):
         self.assertEqual(dialog.count("${socField}"), 1)
         self.assertIn('this.pill(null, "NIE")', dialog)
 
-    def test_slot_mode_selector_contains_exactly_four_supported_modes(self):
+    def test_slot_mode_selector_contains_exactly_three_supported_modes(self):
         method = extract_method(self.sources[0], "slotWorkModes()")
         for mode in (
             "Selling First",
-            "Zero Export To Load",
-            "Zero Export To CT",
+            "Normalna Praca",
             "Charge",
         ):
             self.assertIn(mode, method)
+        self.assertNotIn("Zero Export To Load", method)
+        self.assertNotIn("Zero Export To CT", method)
 
     def test_schedule_table_always_displays_stored_grid_permission_and_current(self):
         source = self.sources[0]

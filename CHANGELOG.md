@@ -30,7 +30,7 @@
 - Edycja zbiorcza i zastosowanie sugestii korzystają z jednej operacji backendowej.
 - Tryb `Charge` nie jest zgodą na Grid Charge; jedyną zgodę określa pole **Ładowanie z sieci** zapisane w konkretnym slocie. Profil Charge jest tylko szablonem wartości początkowych.
 - Tabela harmonogramu ponownie pokazuje zapisane wartości **Ładowanie z sieci** i **Prąd ładowania z sieci** dla każdego aktywnego slotu; dopiero mapowanie fizyczne ogranicza Grid Charge do trybu `Charge` z wartością `TAK`.
-- Okno pojedynczego slotu ponownie udostępnia wszystkie cztery tryby i komplet ręcznie edytowalnych parametrów. Jedno pole SOC zmienia znaczenie zależnie od trybu bez łączenia `minimum_sell_soc` z fizycznym `tou_soc`.
+- Okno pojedynczego slotu udostępnia trzy logiczne tryby (`Selling First`, `Normalna Praca`, `Charge`) i komplet ręcznie edytowalnych parametrów. Jedno pole SOC zmienia znaczenie zależnie od trybu bez łączenia `minimum_sell_soc` z fizycznym `tou_soc`.
 - Nieudana aktualizacja przywraca logiczną konfigurację slotów.
 
 ### Dane i konfiguracja
@@ -56,9 +56,11 @@
 - Pole statusu karty tłumaczy `SELL BLOCKED` jako **Sprzedaż zatrzymana**; pełna przyczyna pozostaje widoczna jako decyzja managera.
 - Rozdzielono `minimum_sell_soc` od fizycznego `tou_soc`: minimalny SOC jest wyłącznie warunkiem `Selling First`, a do Deye TOU trafia niezależny SOC zapisany w konkretnym slocie, w tym docelowy SOC slotu `Charge`.
 - Migracja nie zastępuje brakującego fizycznego `tou_soc` minimalnym SOC sprzedaży ani `0`; wymagające potwierdzenia sloty blokują zapis mapowania przed pierwszą zmianą w Deye.
-- Przywrócono świadomą, bezpośrednią edycję fizycznego Deye Time Of Use. Karta ostrzega, że późniejsze zastosowanie mapowania Harmonogramu sprzedaży może nadpisać te wartości.
+- Przywrócono świadomą, bezpośrednią edycję fizycznego Deye Time Of Use. Karta ostrzega, że późniejsze zastosowanie mapowania Harmonogramu pracy może nadpisać te wartości.
+- Wprowadzono logiczny tryb harmonogramu **Normalna Praca**, który w backendzie mapuje się na fizyczny `Zero Export To Load` lub `Zero Export To CT`; selektor slotów pokazuje teraz tylko trzy tryby: `Selling First`, `Normalna Praca` i `Charge`.
+- Dodano szablon **Ustawienia normalnej pracy** (fizyczny tryb Deye, moc sprzedaży, prądy, SOC TOU) kopiowany do slotu przy jego pierwszym wyborze lub przy ręcznym ponownym wczytaniu; późniejsze zmiany szablonu nie nadpisują istniejących slotów.
 - Tabela harmonogramu pokazuje zgodę **Ładowanie z sieci** jako **tak** albo **nie** dla trybu `Charge`, a dla pozostałych trybów jako **nie dotyczy**; nie wyświetla błędnego stanu **brak**.
-- Obie dystrybuowane kopie karty mają identyczną zawartość i rewizję zasobu `v=0776`.
+- Obie dystrybuowane kopie karty mają identyczną zawartość i rewizję zasobu `v=0777`.
 - Poprawiono zabezpieczanie dynamicznych wartości HTML.
 - Usunięto błędnie wyświetlane encje numeryczne HTML, m.in. w nazwie strategii „Zrównoważony”.
 - Dodano zakładkę `Taryfa i dystrybucja` z wyborem operatora, taryfy i trybu katalogu, jawnym przyciskiem zapisu, diagnostyką aktualizacji oraz profilem 48h dla dziś i jutra.

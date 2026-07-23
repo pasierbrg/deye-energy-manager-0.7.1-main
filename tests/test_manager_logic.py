@@ -934,6 +934,93 @@ class GridAndSlotSafetyTests(unittest.TestCase):
         self.assertEqual(maximum, 1)
 
 
+class NormalProfileTests(unittest.TestCase):
+    def configure_normal_profile(self, runtime):
+        runtime.normal_profile_physical_work_mode = const.MODE_ZERO_EXPORT_CT
+        runtime.normal_profile_sell_power = 2500
+        runtime.normal_profile_discharge_current = 80
+        runtime.normal_profile_charge_current = 90
+        runtime.normal_profile_grid_charge_current = 10
+        runtime.normal_profile_tou_soc = 75
+
+    def test_selecting_normal_operation_copies_template_once(self):
+        runtime = make_runtime()
+        self.configure_normal_profile(runtime)
+        slot_key = runtime.active_slot_key()
+        slot = runtime.slots[slot_key]
+        slot.mode = const.MODE_SELLING_FIRST
+
+        runtime.set_work_mode_for_slot(slot_key, const.MODE_NORMAL_OPERATION)
+        self.assertEqual(slot.mode, const.MODE_NORMAL_OPERATION)
+        self.assertEqual(slot.physical_work_mode, const.MODE_ZERO_EXPORT_CT)
+        self.assertEqual(slot.sell_power, 2500)
+        self.assertEqual(slot.discharge_current, 80)
+        self.assertEqual(slot.charge_current, 90)
+        self.assertEqual(slot.grid_charge_current, 10)
+        self.assertEqual(slot.tou_soc, 75)
+
+    def test_manual_slot_values_survive_template_change(self):
+        runtime = make_runtime()
+        self.configure_normal_profile(runtime)
+        slot_key = runtime.active_slot_key()
+        slot = runtime.slots[slot_key]
+        slot.mode = const.MODE_SELLING_FIRST
+
+        runtime.set_work_mode_for_slot(slot_key, const.MODE_NORMAL_OPERATION)
+        slot.sell_power = 999
+        slot.tou_soc = 50
+
+        runtime.normal_profile_sell_power = 3000
+        runtime.normal_profile_tou_soc = 80
+        runtime.set_work_mode_for_slot(slot_key, const.MODE_NORMAL_OPERATION)
+        self.assertEqual(slot.sell_power, 999)
+        self.assertEqual(slot.tou_soc, 50)
+
+    def test_force_copy_normal_profile_reloads_template(self):
+        runtime = make_runtime()
+        self.configure_normal_profile(runtime)
+        slot_key = runtime.active_slot_key()
+        slot = runtime.slots[slot_key]
+        runtime.set_work_mode_for_slot(slot_key, const.MODE_NORMAL_OPERATION)
+        slot.sell_power = 999
+        slot.tou_soc = 50
+
+        runtime.normal_profile_sell_power = 3000
+        runtime.normal_profile_tou_soc = 80
+        asyncio.run(runtime.async_apply_schedule_patch([
+            {
+                "slot_key": slot_key,
+                "mode": const.MODE_NORMAL_OPERATION,
+                "force_copy_normal_profile": True,
+            }
+        ]))
+        self.assertEqual(slot.sell_power, 3000)
+        self.assertEqual(slot.tou_soc, 80)
+
+    def test_target_mode_never_returns_logical_normal_label(self):
+        runtime = make_runtime()
+        self.configure_normal_profile(runtime)
+        slot = runtime.slots[runtime.active_slot_key()]
+        slot.enabled = True
+        slot.mode = const.MODE_NORMAL_OPERATION
+        slot.physical_work_mode = const.MODE_ZERO_EXPORT_CT
+
+        self.assertEqual(runtime.target_mode, const.MODE_ZERO_EXPORT_CT)
+        self.assertNotEqual(runtime.target_mode, const.MODE_NORMAL_OPERATION)
+
+    def test_save_normal_profile_rejects_non_physical_mode(self):
+        runtime = make_runtime()
+        with self.assertRaises(ValueError):
+            asyncio.run(runtime.async_save_normal_profile({
+                "physical_work_mode": const.MODE_NORMAL_OPERATION,
+                "sell_power": 1000,
+                "discharge_current": 50,
+                "charge_current": 50,
+                "grid_charge_current": 10,
+                "tou_soc": 50,
+            }))
+
+
 class TouSocMappingTests(unittest.TestCase):
     """Regression coverage for logical SOC versus physical Deye TOU SOC."""
 

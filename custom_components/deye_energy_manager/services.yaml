@@ -121,7 +121,7 @@ save_charge_profile:
   fields:
     grid_charge_enabled:
       required: true
-      description: "Wartość początkowa kopiowana do nowego slotu Charge. Po skopiowaniu tylko Ładowanie z sieci: TAK zapisane w konkretnym slocie zezwala na fizyczne Grid Charge; dodatni prąd nie jest zgodą."
+      description: "Wartość początkowa kopiowana do nowego slotu Charge. Po skopiowaniu tylko Ładowanie z sieci: TAK zapisane w konkretnym slocie Charge zezwala na fizyczne Grid Charge; dodatni prąd nie jest zgodą."
       selector:
         boolean:
     charge_current:
@@ -149,6 +149,58 @@ save_charge_profile:
           step: 5
           unit_of_measurement: A
     target_soc:
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+save_normal_profile:
+  name: Zapisz ustawienia normalnej pracy
+  description: Zapisuje szablon kopiowany przy późniejszym wyborze trybu Normalna Praca. Nie nadpisuje istniejących slotów Normalna Praca.
+  fields:
+    physical_work_mode:
+      required: true
+      description: Fizyczny tryb Deye wysyłany do select.deye_inverter_system_work_mode dla slotów Normalna Praca.
+      selector:
+        select:
+          options:
+            - Zero Export To Load
+            - Zero Export To CT
+    sell_power:
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 13000
+          step: 1
+          unit_of_measurement: W
+    discharge_current:
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 240
+          step: 1
+          unit_of_measurement: A
+    charge_current:
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 240
+          step: 1
+          unit_of_measurement: A
+    grid_charge_current:
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 240
+          step: 1
+          unit_of_measurement: A
+    tou_soc:
       required: true
       selector:
         number:

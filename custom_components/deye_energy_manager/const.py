@@ -89,10 +89,19 @@ MODE_SELLING_FIRST = "Selling First"
 MODE_ZERO_EXPORT = "Zero Export To Load"
 MODE_ZERO_EXPORT_CT = "Zero Export To CT"
 MODE_CHARGE = "Charge"
+MODE_NORMAL_OPERATION = "Normalna Praca"
+
+# Stable schedule schema.  Physical Deye work modes remain separate from the
+# logical Normal Operation mode and must never be written to the inverter as
+# the literal ``Normalna Praca`` value.
+SCHEDULE_SCHEMA_VERSION = 1
+PHYSICAL_NORMAL_MODES = (MODE_ZERO_EXPORT, MODE_ZERO_EXPORT_CT)
 
 CONTROL_MODES = ["Schedule", "Manual Sell", "Stop Sell", "Protect Battery", "Charge Battery"]
 WORK_MODES = [MODE_SELLING_FIRST, MODE_ZERO_EXPORT, MODE_ZERO_EXPORT_CT]
-SLOT_MODES = [MODE_SELLING_FIRST, MODE_ZERO_EXPORT, MODE_ZERO_EXPORT_CT, MODE_CHARGE]
+SLOT_MODES = [MODE_SELLING_FIRST, MODE_NORMAL_OPERATION, MODE_CHARGE]
+LEGACY_SLOT_MODES = [MODE_ZERO_EXPORT, MODE_ZERO_EXPORT_CT]
+ACCEPTED_SLOT_MODES = [*SLOT_MODES, *LEGACY_SLOT_MODES]
 
 SLOTS = [
     ("00_01", "00:00-01:00", 0, 1),

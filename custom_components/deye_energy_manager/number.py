@@ -37,6 +37,11 @@ class DeyeManagerNumber(DeyeEnergyManagerEntity, NumberEntity, RestoreEntity):
             "charge_profile_discharge_current": self.runtime.discharge_current_number,
             "charge_profile_grid_charge_current": self.runtime.grid_charge_current_number,
             "charge_profile_target_soc": self.runtime._tou_entity(1, "soc"),
+            "normal_profile_sell_power": self.runtime.max_sell_power_number,
+            "normal_profile_discharge_current": self.runtime.discharge_current_number,
+            "normal_profile_charge_current": self.runtime.charge_current_number,
+            "normal_profile_grid_charge_current": self.runtime.grid_charge_current_number,
+            "normal_profile_tou_soc": self.runtime._tou_entity(1, "soc"),
         }
         return sources.get(self.attr)
 
@@ -74,6 +79,12 @@ class DeyeManagerNumber(DeyeEnergyManagerEntity, NumberEntity, RestoreEntity):
         # The default profile is deliberately a save-only operation.  It is
         # applied to the inverter only by restore_defaults or a safety path.
         if self.attr.startswith("default_"):
+            self.runtime.mark_config_saved()
+            self.runtime.notify_update()
+            return
+        # Normal profile edits are save-only, applied to slots only when
+        # they explicitly select Normalna Praca.
+        if self.attr.startswith("normal_profile_"):
             self.runtime.mark_config_saved()
             self.runtime.notify_update()
             return
@@ -153,6 +164,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         DeyeManagerNumber(runtime, "charge_profile_discharge_current", "Charge profile discharge current", "charge_profile_discharge_current", 0, 240, 5, "A"),
         DeyeManagerNumber(runtime, "charge_profile_grid_charge_current", "Charge profile grid charge current", "charge_profile_grid_charge_current", 0, 240, 5, "A"),
         DeyeManagerNumber(runtime, "charge_profile_target_soc", "Charge profile target SOC", "charge_profile_target_soc", 0, 100, 1, "%"),
+        DeyeManagerNumber(runtime, "normal_profile_sell_power", "Normal profile sell power", "normal_profile_sell_power", 0, 13000, 100, "W"),
+        DeyeManagerNumber(runtime, "normal_profile_discharge_current", "Normal profile discharge current", "normal_profile_discharge_current", 0, 240, 5, "A"),
+        DeyeManagerNumber(runtime, "normal_profile_charge_current", "Normal profile charge current", "normal_profile_charge_current", 0, 240, 5, "A"),
+        DeyeManagerNumber(runtime, "normal_profile_grid_charge_current", "Normal profile grid charge current", "normal_profile_grid_charge_current", 0, 240, 5, "A"),
+        DeyeManagerNumber(runtime, "normal_profile_tou_soc", "Normal profile Deye TOU SOC", "normal_profile_tou_soc", 0, 100, 1, "%"),
     ]
     for key, label, *_ in SLOTS:
         entities.extend(

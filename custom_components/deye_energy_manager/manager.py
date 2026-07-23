@@ -58,8 +58,11 @@ from .const import (
     DOMAIN,
     MODE_SELLING_FIRST,
     MODE_CHARGE,
+    MODE_NORMAL_OPERATION,
     MODE_ZERO_EXPORT,
     MODE_ZERO_EXPORT_CT,
+    PHYSICAL_NORMAL_MODES,
+    SCHEDULE_SCHEMA_VERSION,
     SLOTS,
     SLOT_MODES,
     WORK_MODES,
@@ -118,7 +121,11 @@ class SlotSettings:
     key: str
     label: str
     enabled: bool = False
-    mode: str = MODE_ZERO_EXPORT
+    mode: str = MODE_NORMAL_OPERATION
+    # Physical Deye work mode used only by logical Normal Operation slots.
+    # It is intentionally independent from ``mode`` so no UI/logical label can
+    # ever be sent to the inverter select entity.
+    physical_work_mode: str | None = None
     sell_power: float = 0
     discharge_current: float = 0
     # Per-slot permission for physical Deye TOU Grid Charge.  It is meaningful
@@ -166,6 +173,17 @@ class DeyeEnergyManagerRuntime:
     charge_profile_target_soc: float = 100
     # The only permission to enable Deye Grid Charge for Charge slots.
     charge_profile_grid_enabled: bool = False
+    # User-owned Normal Operation template.  The physical mode is mandatory
+    # and accepts only the two zero-export variants supported by Deye.
+    normal_profile_physical_work_mode: str | None = None
+    normal_profile_sell_power: float = 0
+    normal_profile_discharge_current: float = 0
+    normal_profile_charge_current: float = 0
+    normal_profile_grid_charge_current: float = 0
+    normal_profile_tou_soc: float | None = None
+    _normal_profile_loaded_from_store: bool = False
+    schedule_schema_version: int = 0
+    _restored_slot_mode_keys: set[str] = field(default_factory=set)
     sold_energy_today: float = 0
     sold_value_today: float = 0
     sold_energy_current_hour: float = 0
@@ -222,6 +240,39 @@ class DeyeEnergyManagerRuntime:
 
     def __post_init__(self) -> None:
         self.slots = {key: SlotSettings(key=key, label=label) for key, label, *_ in SLOTS}
+
+    @staticmethod
+    def normalize_schedule_mode(
+        mode: Any,
+        physical_work_mode: Any = None,
+    ) -> tuple[str, str | None, bool]:
+        """Normalize one legacy slot without guessing a physical Deye mode."""
+        if mode in PHYSICAL_NORMAL_MODES:
+            return MODE_NORMAL_OPERATION, str(mode), True
+        if mode == MODE_NORMAL_OPERATION:
+            physical = str(physical_work_mode) if physical_work_mode in PHYSICAL_NORMAL_MODES else None
+            return MODE_NORMAL_OPERATION, physical, False
+        if mode in (MODE_SELLING_FIRST, MODE_CHARGE):
+            return str(mode), None, False
+        raise ValueError(f"Nieobsługiwany tryb harmonogramu: {mode}")
+
+    async def async_restore_slot_mode(self, slot_key: str, restored_mode: str) -> None:
+        """Restore and idempotently migrate one legacy slot entity state."""
+        slot = self.slots[slot_key]
+        stored_physical = slot.physical_work_mode
+        logical, physical, migrated = self.normalize_schedule_mode(restored_mode, stored_physical)
+        slot.mode = logical
+        slot.physical_work_mode = physical
+        self._restored_slot_mode_keys.add(slot_key)
+
+        # Persist the migration once all RestoreEntity slot states have been
+        # observed.  No inverter service call or profile/default substitution
+        # is performed here.
+        all_restored = len(self._restored_slot_mode_keys) == len(self.slots)
+        if migrated or (all_restored and self.schedule_schema_version < SCHEDULE_SCHEMA_VERSION):
+            if all_restored:
+                self.schedule_schema_version = SCHEDULE_SCHEMA_VERSION
+            await self.async_save_ai_data()
 
     @property
     def work_mode_select(self) -> str:
@@ -879,8 +930,8 @@ class DeyeEnergyManagerRuntime:
             "GRID CHARGE ACTIVE": "Ładowanie z sieci według harmonogramu",
             "PV CHARGE ACTIVE": "Ładowanie z PV według harmonogramu",
             "SELLING ACTIVE": "Warunki sprzedaży są spełnione",
-            "ZERO EXPORT CT ACTIVE": "Aktywny tryb Zero Export To CT",
-            "ZERO EXPORT LOAD ACTIVE": "Aktywny tryb Zero Export To Load",
+            "ZERO EXPORT CT ACTIVE": "Aktywny tryb Normalna Praca — Deye: Zero Export To CT",
+            "ZERO EXPORT LOAD ACTIVE": "Aktywny tryb Normalna Praca — Deye: Zero Export To Load",
             "WAITING": "Manager oczekuje na zmianę warunków lub kolejny slot",
         }
         return reasons.get(status, status)
@@ -1025,6 +1076,14 @@ class DeyeEnergyManagerRuntime:
                     "grid_charge_current": self.charge_profile_grid_charge_current,
                     "target_soc": self.charge_profile_target_soc,
                 },
+                "normal_profile": {
+                    "physical_work_mode": self.normal_profile_physical_work_mode,
+                    "sell_power": self.normal_profile_sell_power,
+                    "discharge_current": self.normal_profile_discharge_current,
+                    "charge_current": self.normal_profile_charge_current,
+                    "grid_charge_current": self.normal_profile_grid_charge_current,
+                    "tou_soc": self.normal_profile_tou_soc,
+                },
                 "active_slot": self.active_slot_key(), "next_active_slot": self.next_active_slot,
                 "energy_samples": len(self.energy_samples), "weather": self.weather_context(), "tariff": self.tariff_context()}
 
@@ -1088,6 +1147,13 @@ class DeyeEnergyManagerRuntime:
         future_plan = data.get("future_plan")
         self.future_plan = future_plan if isinstance(future_plan, dict) else {}
         self.last_saved_at = str(data.get("last_saved_at") or "")
+        self.schedule_schema_version = max(0, int(self.safe_float(data.get("schedule_schema_version"), 0)))
+
+        stored_physical_modes = data.get("slot_physical_modes")
+        if isinstance(stored_physical_modes, dict):
+            for slot_key, physical_mode in stored_physical_modes.items():
+                if slot_key in self.slots and physical_mode in PHYSICAL_NORMAL_MODES:
+                    self.slots[slot_key].physical_work_mode = str(physical_mode)
 
         # The Charge template is one atomic user-owned record.  Loading all
         # fields together prevents individual RestoreEntity callbacks from
@@ -1113,6 +1179,37 @@ class DeyeEnergyManagerRuntime:
                 self.charge_profile_grid_enabled = grid_enabled
                 self._charge_profile_loaded_from_store = True
 
+        raw_normal_profile = data.get("normal_profile")
+        if isinstance(raw_normal_profile, dict):
+            physical_mode = raw_normal_profile.get("physical_work_mode")
+            numeric = {
+                "normal_profile_sell_power": self.safe_float(raw_normal_profile.get("sell_power"), float("nan")),
+                "normal_profile_discharge_current": self.safe_float(raw_normal_profile.get("discharge_current"), float("nan")),
+                "normal_profile_charge_current": self.safe_float(raw_normal_profile.get("charge_current"), float("nan")),
+                "normal_profile_grid_charge_current": self.safe_float(raw_normal_profile.get("grid_charge_current"), float("nan")),
+                "normal_profile_tou_soc": self.safe_float(raw_normal_profile.get("tou_soc"), float("nan")),
+            }
+            profile_ok = (
+                physical_mode in PHYSICAL_NORMAL_MODES
+                and math.isfinite(numeric["normal_profile_sell_power"])
+                and 0 <= numeric["normal_profile_sell_power"] <= 13000
+                and all(
+                    math.isfinite(numeric[key]) and 0 <= numeric[key] <= 240
+                    for key in (
+                        "normal_profile_discharge_current",
+                        "normal_profile_charge_current",
+                        "normal_profile_grid_charge_current",
+                    )
+                )
+                and math.isfinite(numeric["normal_profile_tou_soc"])
+                and 0 <= numeric["normal_profile_tou_soc"] <= 100
+            )
+            if profile_ok:
+                self.normal_profile_physical_work_mode = str(physical_mode)
+                for key, value in numeric.items():
+                    setattr(self, key, value)
+                self._normal_profile_loaded_from_store = True
+
     async def async_save_ai_data(self) -> None:
         if self._ai_store is None:
             return
@@ -1121,12 +1218,26 @@ class DeyeEnergyManagerRuntime:
             "history": self.ai_history[:365],
             "future_plan": self.future_plan,
             "last_saved_at": self.last_saved_at,
+            "schedule_schema_version": self.schedule_schema_version,
+            "slot_physical_modes": {
+                slot_key: slot.physical_work_mode
+                for slot_key, slot in self.slots.items()
+                if slot.physical_work_mode in PHYSICAL_NORMAL_MODES
+            },
             "charge_profile": {
                 "charge_current": self.charge_profile_charge_current,
                 "discharge_current": self.charge_profile_discharge_current,
                 "grid_charge_current": self.charge_profile_grid_charge_current,
                 "target_soc": self.charge_profile_target_soc,
                 "grid_charge_enabled": self.charge_profile_grid_enabled,
+            },
+            "normal_profile": {
+                "physical_work_mode": self.normal_profile_physical_work_mode,
+                "sell_power": self.normal_profile_sell_power,
+                "discharge_current": self.normal_profile_discharge_current,
+                "charge_current": self.normal_profile_charge_current,
+                "grid_charge_current": self.normal_profile_grid_charge_current,
+                "tou_soc": self.normal_profile_tou_soc,
             },
         })
 
@@ -2121,7 +2232,14 @@ class DeyeEnergyManagerRuntime:
             # Charge is a manager profile, not a fourth Deye work mode.  Keep
             # the user's selected default topology (e.g. Zero Export To CT).
             return self.default_work_mode
-        return self.active_slot.mode if self.active_slot.enabled else self.default_work_mode
+        if self.active_slot.enabled:
+            if self.active_slot.mode == MODE_NORMAL_OPERATION:
+                # Return the physical Deye mode stored in this slot instead of
+                # the logical Normalna Praca label, which must never be sent
+                # to the inverter select entity.
+                return self.active_slot.physical_work_mode or self.default_work_mode
+            return self.active_slot.mode
+        return self.default_work_mode
 
     @property
     def target_sell_power(self) -> float:
@@ -2202,6 +2320,11 @@ class DeyeEnergyManagerRuntime:
                 return "GRID CHARGE ACTIVE" if self.active_slot.charge_enabled else "PV CHARGE ACTIVE"
             if self.active_slot.mode == MODE_SELLING_FIRST:
                 return "SELLING ACTIVE"
+            if self.active_slot.mode == MODE_NORMAL_OPERATION:
+                physical = self.active_slot.physical_work_mode
+                if physical == MODE_ZERO_EXPORT_CT:
+                    return "ZERO EXPORT CT ACTIVE"
+                return "ZERO EXPORT LOAD ACTIVE"
             if self.active_slot.mode == MODE_ZERO_EXPORT_CT:
                 return "ZERO EXPORT CT ACTIVE"
             if self.active_slot.mode == MODE_ZERO_EXPORT:
@@ -2870,7 +2993,7 @@ class DeyeEnergyManagerRuntime:
             "tou_soc": (0.0, 100.0),
             "min_sell_price": (0.0, 5.0),
         }
-        allowed_fields = {"enabled", "mode", "charge_enabled", *numeric_limits}
+        allowed_fields = {"enabled", "mode", "charge_enabled", "force_copy_normal_profile", *numeric_limits}
 
         async with self._operation_lock:
             previous_slots = {key: replace(slot) for key, slot in self.slots.items()}
@@ -2893,12 +3016,31 @@ class DeyeEnergyManagerRuntime:
                     if "enabled" in update:
                         slot.enabled = bool(update["enabled"])
                     previous_mode = slot.mode
+                    force_copy = bool(update.get("force_copy_normal_profile"))
                     if "mode" in update:
                         mode = str(update["mode"])
                         if mode not in SLOT_MODES:
                             raise ValueError(f"Unsupported slot mode: {mode}")
                         slot.mode = mode
-                        if mode == MODE_CHARGE:
+                        if mode == MODE_NORMAL_OPERATION and (previous_mode != MODE_NORMAL_OPERATION or force_copy):
+                            slot.enabled = True
+                            if previous_mode == MODE_CHARGE:
+                                slot.charge_enabled = False
+                            # Copy the normal profile template once, or again when
+                            # the user explicitly asks for a reload.
+                            if self.normal_profile_physical_work_mode in PHYSICAL_NORMAL_MODES:
+                                slot.physical_work_mode = self.normal_profile_physical_work_mode
+                            if self.normal_profile_sell_power >= 0:
+                                slot.sell_power = self.normal_profile_sell_power
+                            if self.normal_profile_discharge_current >= 0:
+                                slot.discharge_current = self.normal_profile_discharge_current
+                            if self.normal_profile_charge_current >= 0:
+                                slot.charge_current = self.normal_profile_charge_current
+                            if self.normal_profile_grid_charge_current >= 0:
+                                slot.grid_charge_current = self.normal_profile_grid_charge_current
+                            if self.normal_profile_tou_soc is not None and self.normal_profile_tou_soc >= 0:
+                                slot.tou_soc = self.normal_profile_tou_soc
+                        elif mode == MODE_CHARGE:
                             slot.enabled = True
                             if previous_mode != MODE_CHARGE:
                                 slot.charge_current = self.charge_profile_charge_current
@@ -2908,6 +3050,8 @@ class DeyeEnergyManagerRuntime:
                                 slot.charge_enabled = self.charge_profile_grid_enabled
                         elif previous_mode == MODE_CHARGE:
                             slot.charge_enabled = False
+                        elif previous_mode == MODE_NORMAL_OPERATION:
+                            slot.physical_work_mode = None
                     if "charge_enabled" in update:
                         slot.charge_enabled = bool(update["charge_enabled"]) if slot.mode == MODE_CHARGE else False
                     for field_name, (minimum, maximum) in numeric_limits.items():
@@ -3271,6 +3415,62 @@ class DeyeEnergyManagerRuntime:
         # This is a template for future transitions into Charge.  Existing
         # Charge slots, including manual overrides, are deliberately untouched.
 
+    async def async_save_normal_profile(self, values: dict[str, Any]) -> None:
+        """Atomically save the user-owned Normal Operation template.
+
+        The template is copied once into a slot when Normalna Praca is
+        selected.  Later changes to this template never overwrite existing
+        slots.  No inverter entity is written here.
+        """
+        physical_mode = str(values.get("physical_work_mode") or "")
+        if physical_mode not in PHYSICAL_NORMAL_MODES:
+            raise ValueError(
+                "Fizyczny tryb Deye musi być Zero Export To Load albo Zero Export To CT"
+            )
+        numeric = {
+            "normal_profile_sell_power": self.safe_float(values.get("sell_power"), float("nan")),
+            "normal_profile_discharge_current": self.safe_float(values.get("discharge_current"), float("nan")),
+            "normal_profile_charge_current": self.safe_float(values.get("charge_current"), float("nan")),
+            "normal_profile_grid_charge_current": self.safe_float(values.get("grid_charge_current"), float("nan")),
+            "normal_profile_tou_soc": self.safe_float(values.get("tou_soc"), float("nan")),
+        }
+        profile_entities = {
+            "normal_profile_sell_power": ("Max Sell Power", self.max_sell_power_number),
+            "normal_profile_discharge_current": ("Maximum Battery Discharge Current", self.discharge_current_number),
+            "normal_profile_charge_current": ("Maximum Battery Charge Current", self.charge_current_number),
+            "normal_profile_grid_charge_current": ("Maximum Battery Grid Charge Current", self.grid_charge_current_number),
+            "normal_profile_tou_soc": ("Deye Time Of Use SOC", self._tou_entity(1, "soc")),
+        }
+        self._validate_select_entity("System Work Mode", self.work_mode_select, physical_mode)
+        for key, value in numeric.items():
+            self._validate_number_entity(*profile_entities[key], value)
+        previous = {
+            key: getattr(self, key)
+            for key in ("normal_profile_physical_work_mode", *numeric)
+        }
+        previous_loaded = self._normal_profile_loaded_from_store
+        previous_saved_at = self.last_saved_at
+        self.normal_profile_physical_work_mode = physical_mode
+        for key, value in numeric.items():
+            setattr(self, key, value)
+        self._normal_profile_loaded_from_store = True
+        self.last_saved_at = ha_now().isoformat(timespec="seconds")
+        try:
+            await self.async_save_ai_data()
+        except Exception:
+            self.normal_profile_physical_work_mode = previous["normal_profile_physical_work_mode"]
+            for key in numeric:
+                setattr(self, key, previous[key])
+            self._normal_profile_loaded_from_store = previous_loaded
+            self.last_saved_at = previous_saved_at
+            self.notify_update()
+            raise
+        self.last_error = ""
+        self.last_action = "Zapisano ustawienia normalnej pracy"
+        self.notify_update()
+        # This is a template for future Normalna Praca transitions.  Existing
+        # Normalna Praca slots, including manual overrides, are untouched.
+
     async def async_save_default_settings(self, values: dict[str, Any]) -> None:
         """Save the user-owned recovery profile without writing to Deye now."""
         mode = str(values.get("mode") or "")
@@ -3447,7 +3647,26 @@ class DeyeEnergyManagerRuntime:
             slot = self.slots[slot_key]
             previous_mode = slot.mode
             slot.mode = mode
-            if mode == MODE_CHARGE:
+            if mode == MODE_NORMAL_OPERATION and previous_mode != MODE_NORMAL_OPERATION:
+                slot.enabled = True
+                self.scheduler_enabled = True
+                if previous_mode == MODE_CHARGE:
+                    slot.charge_enabled = False
+                # Copy the normal profile template once into this slot.
+                # Later changes to the template do not affect existing slots.
+                if self.normal_profile_physical_work_mode in PHYSICAL_NORMAL_MODES:
+                    slot.physical_work_mode = self.normal_profile_physical_work_mode
+                if math.isfinite(self.normal_profile_sell_power) and 0 <= self.normal_profile_sell_power <= 13000:
+                    slot.sell_power = self.normal_profile_sell_power
+                if math.isfinite(self.normal_profile_discharge_current) and 0 <= self.normal_profile_discharge_current <= 240:
+                    slot.discharge_current = self.normal_profile_discharge_current
+                if math.isfinite(self.normal_profile_charge_current) and 0 <= self.normal_profile_charge_current <= 240:
+                    slot.charge_current = self.normal_profile_charge_current
+                if math.isfinite(self.normal_profile_grid_charge_current) and 0 <= self.normal_profile_grid_charge_current <= 240:
+                    slot.grid_charge_current = self.normal_profile_grid_charge_current
+                if self.normal_profile_tou_soc is not None and math.isfinite(self.normal_profile_tou_soc) and 0 <= self.normal_profile_tou_soc <= 100:
+                    slot.tou_soc = self.normal_profile_tou_soc
+            elif mode == MODE_CHARGE:
                 slot.enabled = True
                 self.scheduler_enabled = True
                 if previous_mode != MODE_CHARGE:
@@ -3458,6 +3677,8 @@ class DeyeEnergyManagerRuntime:
                     slot.charge_enabled = self.charge_profile_grid_enabled
             elif previous_mode == MODE_CHARGE:
                 slot.charge_enabled = False
+            elif previous_mode == MODE_NORMAL_OPERATION:
+                slot.physical_work_mode = None
             self._clear_slot_failure_latch()
             self.notify_update()
 
