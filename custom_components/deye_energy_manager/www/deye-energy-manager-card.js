@@ -909,19 +909,6 @@ class DeyeEnergyManagerCard extends HTMLElement {
     return profile && typeof profile === "object" ? profile : {};
   }
 
-  normalProfileStoredValues() {
-    const statusId = this.entity("sensor", "manager_status");
-    const profile = this._hass?.states?.[statusId]?.attributes?.normal_profile;
-    return profile && typeof profile === "object" ? profile : {};
-  }
-
-  normalProfilePhysicalMode() {
-    const entityId = this.entity("select", "normal_profile_mode");
-    const state = this.state(entityId);
-    if (state && state !== "unknown" && state !== "unavailable" && state !== "") return state;
-    return this.normalProfileStoredValues().physical_work_mode || "";
-  }
-
   chargeProfileNumericValue(entitySuffix, profileKey) {
     const entityId = this.entity("number", entitySuffix);
     const state = this.displayState(entityId, "");
@@ -1294,23 +1281,13 @@ class DeyeEnergyManagerCard extends HTMLElement {
   normalProfileInput(name, entityId, unit = "") {
     const entity = this._hass.states[entityId];
     const current = entity && !["unknown", "unavailable"].includes(entity.state) ? entity.state : "";
-    const stored = this.normalProfileStoredValues()[name];
-    const fallbackValue = Number.isFinite(Number(stored)) ? String(stored) : "";
     const value = Object.prototype.hasOwnProperty.call(this._normalProfileDraft, name)
-      ? this._normalProfileDraft[name]
-      : (current || fallbackValue);
-    const rawMin = Number(entity?.attributes?.min);
-    const rawMax = Number(entity?.attributes?.max);
-    const rawStep = Number(entity?.attributes?.step);
-    const fallback = name === "sell_power"
-      ? { min: 0, max: 13000, step: 100 }
-      : name === "tou_soc"
-        ? { min: 0, max: 100, step: 1 }
-        : { min: 0, max: 240, step: 5 };
-    const min = Number.isFinite(rawMin) ? rawMin : fallback.min;
-    const max = Number.isFinite(rawMax) ? rawMax : fallback.max;
-    const step = Number.isFinite(rawStep) && rawStep > 0 ? rawStep : fallback.step;
-    return `<label class="field"><input data-normal-profile-number="${this.escapeHtml(name)}" type="number" inputmode="decimal" value="${this.escapeHtml(value ?? "")}" min="${min}" max="${max}" step="${step}"><span>${this.escapeHtml(unit)}</span></label>`;
+      ? this._normalProfileDraft[name] : current;
+    const min = Number(entity?.attributes?.min);
+    const max = Number(entity?.attributes?.max);
+    const step = Number(entity?.attributes?.step);
+    const range = Number.isFinite(min) && Number.isFinite(max) && Number.isFinite(step) && step > 0;
+    return `<label class="field"><input data-normal-profile-number="${this.escapeHtml(name)}" type="number" inputmode="decimal" value="${this.escapeHtml(value)}" ${range ? `min="${min}" max="${max}" step="${step}"` : ""} ${this.exists(entityId) && current !== "" && range ? "" : "disabled"}><span>${this.escapeHtml(unit)}</span></label>`;
   }
 
   async saveDefaultSettings() {
@@ -2033,7 +2010,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
       ct: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/><path d="M12 8v8M8 12h8"/></svg>',
       charge: '<svg viewBox="0 0 24 24"><path d="M13 2 5 13h6l-1 9 8-12h-6z"/></svg>',
       shield: '<svg viewBox="0 0 24 24"><path d="M12 3 5 6v6c0 4 3 7 7 9 4-2 7-5 7-9V6z"/><path d="M9 12l2 2 4-5"/></svg>',
-      normal: '<svg viewBox="0 0 24 24"><path d="M12 3L4 9v12h6v-7h4v7h6V9l-8-6z"/></svg>',
+      normal: '<svg viewBox="0 0 24 24"><path d="M3 12h2v7h14v-7h2"/><path d="M5 10l7-7 7 7"/><path d="M9 21v-6h6v6"/><path d="M12 3v4"/></svg>',
       edit: '<svg viewBox="0 0 24 24"><path d="M4 20h4l11-11-4-4L4 16z"/><path d="M13 6l4 4"/></svg>',
       gear: '<svg viewBox="0 0 24 24"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"/><path d="M4 12h2m12 0h2M12 4v2m0 12v2M6.3 6.3l1.4 1.4m8.6 8.6 1.4 1.4m0-11.4-1.4 1.4m-8.6 8.6-1.4 1.4"/></svg>',
       ai: '<svg viewBox="0 0 24 24"><path d="M12 3l1.7 5.3L19 10l-5.3 1.7L12 17l-1.7-5.3L5 10l5.3-1.7z"/><path d="M18 15l.8 2.2L21 18l-2.2.8L18 21l-.8-2.2L15 18l2.2-.8z"/></svg>',
@@ -2061,7 +2038,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
   modeLegend() {
     return this.slotWorkModes().concat(["Wy\u0142\u0105czone"]).map((mode) => {
       const meta = mode === "Wy\u0142\u0105czone" ? this.modeMeta("", false) : this.modeMeta(mode, true);
-      return `<div class="mode-tile ${meta.cls}" data-mode-info="${this.escapeHtml(meta.title)}">
+      return `<div class="mode-tile ${meta.cls}">
         <div class="mode-icon">${this.iconSvg(meta.icon)}</div>
         <div><strong>${meta.title}</strong><span>${meta.subtitle}</span></div>
       </div>`;
@@ -2069,40 +2046,8 @@ class DeyeEnergyManagerCard extends HTMLElement {
   }
 
   modePill(mode, enabled) {
-    const meta = this.modeMeta(this.normalizeScheduleMode(mode), enabled);
+    const meta = this.modeMeta(mode, enabled);
     return `<span class="mode-pill ${meta.cls}">${meta.title}</span>`;
-  }
-
-  normalizeScheduleMode(mode) {
-    const normalized = this.norm(mode);
-    if (normalized.includes("zero") || normalized.includes("ct")) return "Normalna Praca";
-    if (normalized.includes("selling")) return "Selling First";
-    if (normalized.includes("charge")) return "Charge";
-    if (normalized.includes("normalna praca") || normalized.includes("normal_operation")) return "Normalna Praca";
-    return mode;
-  }
-
-  defaultSettingsStoredValues() {
-    const statusId = this.entity("sensor", "manager_status");
-    const defaults = this._hass?.states?.[statusId]?.attributes?.default_settings;
-    return defaults && typeof defaults === "object" ? defaults : {};
-  }
-
-  modeInfoTooltip(mode) {
-    const normalized = this.norm(mode);
-    if (normalized.includes("selling")) {
-      return `<strong>Selling First</strong><br>Moc: ${this.numberState(this.entity("number", "default_sell_power"), 0)} W<br>Rozładowanie: ${this.numberState(this.entity("number", "default_discharge_current"), 0)} A<br>Ładowanie: ${this.numberState(this.entity("number", "default_charge_current"), 0)} A<br>Sieć: ${this.numberState(this.entity("number", "default_grid_charge_current"), 0)} A<br>Min. SOC: ${this.numberState(this.entity("number", "minimum_sell_soc"), 0)}%<br>Cena min.: ${this.numberState(this.entity("number", "minimum_sell_price"), 0)} PLN`;
-    }
-    if (normalized.includes("normalna praca") || normalized.includes("normal_operation")) {
-      const profile = this.normalProfileStoredValues();
-      return `<strong>Normalna Praca</strong><br>Fizyczny tryb: ${profile.physical_work_mode || "—"}<br>Moc: ${profile.sell_power ?? "—"} W<br>Rozładowanie: ${profile.discharge_current ?? "—"} A<br>Ładowanie: ${profile.charge_current ?? "—"} A<br>Sieć: ${profile.grid_charge_current ?? "—"} A<br>SOC: ${profile.tou_soc ?? "—"}%`;
-    }
-    if (normalized.includes("charge")) {
-      const profile = this.chargeProfileStoredValues();
-      return `<strong>Charge</strong><br>Ładowanie: ${profile.charge_current ?? "—"} A<br>Rozładowanie: ${profile.discharge_current ?? "—"} A<br>Sieć: ${profile.grid_charge_current ?? "—"} A<br>Docelowy SOC: ${profile.target_soc ?? "—"}%<br>Grid enabled: ${profile.grid_charge_enabled ? "TAK" : "NIE"}`;
-    }
-    const defaults = this.defaultSettingsStoredValues();
-    return `<strong>Wyłączone</strong><br>Domyślny tryb: ${defaults.mode || "—"}<br>Moc: ${defaults.sell_power ?? "—"} W<br>Rozładowanie: ${defaults.discharge_current ?? "—"} A<br>Ładowanie: ${defaults.charge_current ?? "—"} A<br>Sieć: ${defaults.grid_charge_current ?? "—"} A`;
   }
 
   slotSummary(entities, enabled) {
@@ -3311,13 +3256,13 @@ class DeyeEnergyManagerCard extends HTMLElement {
           <button class="wide-action" data-save-charge-profile="1">Zapisz ustawienia ładowania</button>
           <h3>Ustawienia normalnej pracy</h3>
           <div class="hint">Ten szablon jest kopiowany do slotu tylko w chwili wybrania trybu <strong>Normalna Praca</strong>. Późniejsze ręczne zmiany w danym slocie mają pierwszeństwo i nie są automatycznie nadpisywane zmianami szablonu.</div>
-          ${this.row("Tryb normalnej pracy", this.rawSelect("normal-profile-mode", ["Zero Export To Load", "Zero Export To CT"], this.normalProfilePhysicalMode()))}
+          ${this.row("Tryb normalnej pracy", this.rawSelect("normal-profile-mode", ["Zero Export To Load", "Zero Export To CT"], this.state(this.entity("select", "normal_profile_mode"))))}
           ${this.row("Maksymalna moc sprzedaży", this.normalProfileInput("sell_power", this.entity("number", "normal_profile_sell_power"), "W"))}
           ${this.row("Maksymalny prąd rozładowania", this.normalProfileInput("discharge_current", this.entity("number", "normal_profile_discharge_current"), "A"))}
           ${this.row("Maksymalny prąd ładowania baterii", this.normalProfileInput("charge_current", this.entity("number", "normal_profile_charge_current"), "A"))}
           ${this.row("Maksymalny prąd ładowania z sieci", this.normalProfileInput("grid_charge_current", this.entity("number", "normal_profile_grid_charge_current"), "A"))}
-          ${this.row("Minimalny SOC", this.normalProfileInput("tou_soc", this.entity("number", "normal_profile_tou_soc"), "%"))}
-          <div class="hint">Wartość SOC zapisywana do Deye Time Of Use dla slotów Normalna Praca.</div>
+          ${this.row("SOC baterii Deye (TOU)", this.normalProfileInput("tou_soc", this.entity("number", "normal_profile_tou_soc"), "%"))}
+          <div class="hint">Fizyczny SOC zapisywany do Deye Time Of Use dla slotów Normalnej Pracy. Nie jest to minimalny SOC sprzedaży.</div>
           <button class="wide-action" data-save-normal-profile="1">Zapisz ustawienia normalnej pracy</button>
           <div class="hint defaults-status ${this._defaultsStatus}" data-defaults-status ${this._defaultsMessage ? "" : "hidden"}>${this.escapeHtml(this._defaultsMessage)}</div>`;
       } else if (tab === "tou") {
@@ -3571,7 +3516,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
       const gridChargeCurrent = this.numberState(entities.gridChargeCurrent);
       const touSoc = mode === "Selling First" ? this.numberState(entities.minimumSellSoc) : this.numberState(entities.touSoc, "wymaga potwierdzenia");
       const selected = this._selectedSlots?.has(key);
-      const meta = this.modeMeta(this.normalizeScheduleMode(mode), enabled);
+      const meta = this.modeMeta(mode, enabled);
       const rowClass = [
         activeSlot === key ? "active" : "",
         selected ? "selected" : "",
@@ -3628,7 +3573,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
       <ha-card class="theme-schedule-dark">
         <style>
           ha-card{--bg:#020b12;--panel:rgba(9,24,35,.92);--panel2:rgba(13,31,45,.88);--panel3:rgba(16,38,54,.72);--line:rgba(118,166,190,.22);--line2:rgba(80,169,226,.38);--text:#eef7ff;--muted:#9eb8c8;--blue:#159bff;--blue2:#0a6ad8;--green:#7ee22d;--green2:#35d66f;--purple:#bc63ff;--gold:#f6a619;--red:#ff4242;overflow:hidden;background:radial-gradient(circle at 18% 0%,rgba(26,106,164,.22),transparent 34%),linear-gradient(180deg,#020913,#06131c 54%,#050b10);color:var(--text);border:1px solid rgba(101,142,164,.32);box-shadow:0 18px 45px rgba(0,0,0,.35)}
-          .dem-v076{padding:18px;display:grid;gap:16px;font-family:Roboto,Arial,sans-serif;font-size:14px}
+          .dem-v073{padding:18px;display:grid;gap:16px;font-family:Roboto,Arial,sans-serif;font-size:14px}
           svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
           button{font:inherit}
           .panel,.schedule-shell,.table-wrap{border:1px solid rgba(107,157,182,.34);border-radius:10px;background:radial-gradient(circle at 12% 8%,rgba(20,85,130,.16),transparent 32%),linear-gradient(180deg,rgba(5,16,26,.98),rgba(7,21,32,.98));box-shadow:inset 0 1px 0 rgba(255,255,255,.035),0 12px 28px rgba(0,0,0,.18)}
@@ -3645,9 +3590,9 @@ class DeyeEnergyManagerCard extends HTMLElement {
           .schedule-shell{padding:10px;background:radial-gradient(circle at 12% 8%,rgba(20,85,130,.22),transparent 30%),linear-gradient(180deg,rgba(5,16,26,.98),rgba(7,21,32,.98))}
           .schedule-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:8px}.schedule-title h2{margin:0;display:flex;align-items:center;gap:8px;font-size:22px;font-weight:850}.schedule-title p{margin:3px 0 0;color:#c1d4df;font-size:13px}.title-icon{width:28px;height:28px;border-radius:999px;border:1px solid rgba(142,181,202,.42);background:rgba(255,255,255,.03);color:#d9ecf6;display:inline-flex;align-items:center;justify-content:center;cursor:pointer}.title-icon.ai{color:#2fa8ff}.title-icon:hover{border-color:var(--blue);color:#fff}.save-indicator{display:none;border-radius:999px;padding:4px 9px;font-size:11px;font-weight:800;line-height:1.2}.save-indicator.saving{display:inline-flex;color:#ffd166;background:rgba(246,166,25,.16)}.save-indicator.saved{display:inline-flex;color:var(--green);background:rgba(53,214,111,.14)}.save-indicator.error{display:inline-flex;max-width:360px;color:#ff8b98;background:rgba(255,77,99,.15);white-space:normal}
           .schedule-tools{display:flex;gap:9px;align-items:center;flex-wrap:wrap;justify-content:flex-end}.tool-btn,.gear-btn,.bulk-actions button,.set-btn,.icon-only{border:1px solid rgba(100,145,170,.42);border-radius:8px;background:rgba(7,17,27,.72);color:#eaf7ff;min-height:38px;padding:0 13px;display:inline-flex;align-items:center;gap:9px;cursor:pointer}.tool-btn.active{border-color:var(--blue);color:#2ea7ff;background:rgba(8,53,92,.55)}.gear-btn{width:48px;justify-content:center;padding:0}.gear-btn:hover,.tool-btn:hover,.set-btn:hover,.icon-only:hover{border-color:var(--blue);box-shadow:0 0 0 1px rgba(21,155,255,.25) inset}.icon-only{width:32px;min-height:28px;padding:0;justify-content:center}.set-btn{min-height:29px;padding:0 12px;font-weight:800}
-          .mode-legend{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin:4px 0 8px}.mode-tile{display:flex;align-items:center;gap:8px;min-width:0}.mode-icon{width:32px;height:32px;border-radius:11px;display:flex;align-items:center;justify-content:center;flex:0 0 auto}.mode-tile.selling .mode-icon{background:rgba(126,226,45,.16);color:var(--green)}.mode-tile.normal .mode-icon{background:rgba(0,212,170,.16);color:#00d4aa}.mode-tile.zero .mode-icon{background:rgba(21,155,255,.16);color:var(--blue)}.mode-tile.ct .mode-icon{background:rgba(188,99,255,.18);color:var(--purple)}.mode-tile.charge .mode-icon{background:rgba(246,166,25,.18);color:var(--gold)}.mode-tile.disabled .mode-icon{background:rgba(155,178,193,.12);color:#b9c9d4}.mode-tile strong{display:block;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mode-tile.selling strong{color:var(--green)}.mode-tile.normal strong{color:#00d4aa}.mode-tile.zero strong{color:var(--blue)}.mode-tile.ct strong{color:var(--purple)}.mode-tile.charge strong{color:var(--gold)}.mode-tile span{display:block;color:#c2d4de;margin-top:1px;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+          .mode-legend{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin:4px 0 8px}.mode-tile{display:flex;align-items:center;gap:8px;min-width:0}.mode-icon{width:32px;height:32px;border-radius:11px;display:flex;align-items:center;justify-content:center;flex:0 0 auto}.mode-tile.selling .mode-icon{background:rgba(126,226,45,.16);color:var(--green)}.mode-tile.zero .mode-icon{background:rgba(21,155,255,.16);color:var(--blue)}.mode-tile.ct .mode-icon{background:rgba(188,99,255,.18);color:var(--purple)}.mode-tile.charge .mode-icon{background:rgba(246,166,25,.18);color:var(--gold)}.mode-tile.disabled .mode-icon{background:rgba(155,178,193,.12);color:#b9c9d4}.mode-tile strong{display:block;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mode-tile.selling strong{color:var(--green)}.mode-tile.zero strong{color:var(--blue)}.mode-tile.ct strong{color:var(--purple)}.mode-tile.charge strong{color:var(--gold)}.mode-tile span{display:block;color:#c2d4de;margin-top:1px;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
           .schedule-main{display:grid;grid-template-columns:minmax(0,1fr);gap:10px}.schedule-main.selecting{grid-template-columns:minmax(0,1fr) 340px}.schedule-left{min-width:0}.schedule-table-card{border:1px solid rgba(107,157,182,.28);border-radius:8px;overflow:hidden;background:rgba(6,19,29,.62)}.schedule-table{width:100%;border-collapse:collapse;table-layout:auto}.schedule-table th,.schedule-table td{padding:1px 4px;border-top:1px solid var(--line);text-align:left;vertical-align:middle}.schedule-table th{background:rgba(19,41,56,.86);color:#d9ecf6;font-size:10px;font-weight:800}.schedule-table td{font-size:11px}.schedule-table tr{height:24px}.schedule-table tr.active{background:rgba(37,105,151,.32)}.schedule-table tr.selected{background:rgba(0,122,255,.14);box-shadow:inset 0 0 0 1px var(--blue)}.check-col{width:30px}.time-col{width:56px;min-width:56px;max-width:56px;text-align:left;white-space:nowrap}.schedule-table .metric,.schedule-table .mode-pill{white-space:nowrap}.schedule-table col.col-check{width:30px}.schedule-table col.col-time{width:58px}.schedule-table col.col-mode{width:118px}.schedule-table col.col-power{width:76px}.schedule-table col.col-current{width:78px}.schedule-table col.col-grid{width:54px}.schedule-table col.col-grid-current{width:72px}.schedule-table col.col-soc{width:56px}.schedule-table col.col-price{width:70px}.schedule-table col.col-active{width:56px}.schedule-table col.col-action{width:42px}.slot-check{display:inline-flex;align-items:center;justify-content:center}.slot-check input{display:none}.slot-check span{width:18px;height:18px;border:1px solid rgba(159,190,207,.55);border-radius:5px;background:rgba(255,255,255,.02)}.slot-check input:checked+span{background:var(--blue);border-color:var(--blue);box-shadow:inset 0 0 0 3px rgba(0,0,0,.18)}.slot-check input:checked+span::after{content:"";display:block;width:8px;height:5px;border-left:2px solid #00131f;border-bottom:2px solid #00131f;transform:rotate(-45deg);margin:5px 0 0 5px}
-          .mode-pill{display:inline-flex;align-items:center;border-radius:6px;padding:3px 7px;font-weight:800;background:#223241;color:#d7e7ef;white-space:nowrap}.mode-pill.selling{background:rgba(72,154,38,.24);color:var(--green)}.mode-pill.normal{background:rgba(0,212,170,.18);color:#00d4aa}.mode-pill.zero{background:rgba(21,155,255,.18);color:#55baff}.mode-pill.ct{background:rgba(188,99,255,.18);color:#ce8cff}.mode-pill.charge{background:rgba(246,166,25,.18);color:#ffc65a}.mode-pill.disabled{background:rgba(142,160,172,.16);color:#d6e1e8}.mode-tooltip{position:absolute;z-index:30;display:none;max-width:260px;padding:10px 12px;border-radius:8px;background:rgba(4,22,34,.97);border:1px solid rgba(80,140,170,.4);box-shadow:0 10px 28px rgba(0,0,0,.45);color:#e2f1f8;font-size:12px;line-height:1.5;pointer-events:none}.mode-tooltip.visible{display:block}.mode-tooltip strong{display:block;margin-bottom:6px;color:#fff;font-size:13px}
+          .mode-pill{display:inline-flex;align-items:center;border-radius:6px;padding:3px 7px;font-weight:800;background:#223241;color:#d7e7ef;white-space:nowrap}.mode-pill.selling{background:rgba(72,154,38,.24);color:var(--green)}.mode-pill.zero{background:rgba(21,155,255,.18);color:#55baff}.mode-pill.ct{background:rgba(188,99,255,.18);color:#ce8cff}.mode-pill.charge{background:rgba(246,166,25,.18);color:#ffc65a}.mode-pill.disabled{background:rgba(142,160,172,.16);color:#d6e1e8}
           .metric{white-space:nowrap}.metric svg{width:16px;height:16px;vertical-align:-3px}.metric.sell{color:#8cef3b}.metric.discharge{color:#ff4848}.metric.charge{color:#20a9ff}.metric.grid,.metric.grid-current{color:#ffc65a}.metric.soc{color:#d279ff}.metric.price-limit{color:#2dff95}
           .pill{border:0;border-radius:999px;min-width:42px;padding:3px 9px;font-weight:900;cursor:pointer;background:#233849;color:#d9edf5}.pill.on{background:linear-gradient(90deg,#0a68d7,#159bff);color:#fff}.pill.off{background:#263e51;color:#d9edf5}.pill.missing{opacity:.62}
           .schedule-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid var(--line);padding:7px 12px}.schedule-foot strong{color:#2ea7ff}.foot-actions{display:flex;gap:9px;flex-wrap:wrap}.foot-actions button{border:1px solid rgba(100,145,170,.42);border-radius:8px;background:rgba(7,17,27,.72);color:#eaf7ff;min-height:32px;padding:0 12px;display:inline-flex;align-items:center;gap:8px;cursor:pointer}.foot-actions .primary{background:linear-gradient(180deg,#0b7eee,#075bc0);border-color:#159bff}
@@ -3678,9 +3623,9 @@ class DeyeEnergyManagerCard extends HTMLElement {
            .ai-energy-48-crisp{grid-column:1/-1;min-width:0}.ai-energy-48-crisp>h3{margin:0 0 10px;color:#7ee22d}.ai-readable-stack{display:grid;gap:12px}.ai-crisp-chart{position:relative;overflow:visible;padding:15px 14px 12px;background:radial-gradient(circle at 50% 0%,rgba(18,86,117,.12),transparent 46%),linear-gradient(180deg,rgba(9,34,49,.92),rgba(5,22,33,.94))}.ai-crisp-chart h3{margin:0 0 9px;color:#7ee22d;font-size:16px}.ai-crisp-legend{display:flex;justify-content:center;flex-wrap:wrap;gap:5px 12px;margin:0 0 12px}.ai-crisp-legend button{display:inline-flex;align-items:center;gap:5px;border:0;border-radius:4px;background:transparent;color:#b8cdd7;font:inherit;font-size:11px;padding:3px 4px;cursor:pointer}.ai-crisp-legend button:hover{background:rgba(69,149,188,.12);color:#fff}.ai-crisp-legend button.disabled{opacity:.32;text-decoration:line-through}.ai-crisp-legend i{display:block;width:13px;height:7px;border-radius:2px;background:#35aee8}.ai-crisp-legend .actual i{background:#ff8a32}.ai-crisp-legend .solcast i,.ai-crisp-legend .corrected i,.ai-crisp-legend .soc i,.ai-crisp-legend .minimum i{height:3px}.ai-crisp-legend .solcast i{background:#67c842}.ai-crisp-legend .corrected i{background:#bd6dff}.ai-crisp-legend .band i{height:9px;background:rgba(151,191,213,.34);border:1px solid rgba(161,205,228,.55)}.ai-crisp-legend .soc i{background:#ffd200}.ai-crisp-legend .minimum i{background:repeating-linear-gradient(90deg,#ff6577 0 5px,transparent 5px 8px)}.ai-crisp-layout{display:grid;grid-template-columns:44px minmax(0,1fr) 38px;gap:7px;align-items:stretch}.ai-crisp-main{min-width:0}.ai-crisp-plot{position:relative;height:268px;border-bottom:1px solid rgba(119,166,188,.3);background:linear-gradient(180deg,rgba(4,18,28,.25),rgba(4,18,28,.52))}.ai-crisp-svg{display:block!important;width:100%!important;min-width:0!important;height:100%!important;max-height:none!important;overflow:visible}.ai-crisp-grid{stroke:rgba(118,164,185,.18);stroke-width:1}.ai-crisp-guide{stroke:rgba(123,170,191,.2);stroke-width:1;stroke-dasharray:5 6}.ai-crisp-baseline{stroke:rgba(157,202,222,.58);stroke-width:1}.ai-crisp-load{fill:#35aee8}.ai-crisp-actual{fill:#ff8a32}.ai-crisp-band{fill:rgba(151,191,213,.18);stroke:rgba(171,210,228,.38);stroke-width:1}.ai-crisp-solcast{fill:none;stroke:#67c842;stroke-width:2.6;stroke-linejoin:round;stroke-linecap:round}.ai-crisp-corrected{fill:none;stroke:#bd6dff;stroke-width:2.7;stroke-linejoin:round;stroke-linecap:round}.ai-crisp-soc{fill:none;stroke:#ffd200;stroke-width:2.8;stroke-linejoin:round;stroke-linecap:round}.ai-crisp-min-soc{stroke:#ff6577;stroke-width:1.5;stroke-dasharray:7 5}.ai-crisp-now{stroke:#ff5d70;stroke-width:1.8;stroke-dasharray:6 4}.ai-crisp-now-tag{position:absolute;top:7px;right:8px;border:1px solid #ff5d70;border-radius:4px;background:#f4f7f8;color:#263943;padding:2px 6px;font-size:10px;font-weight:900}.ai-crisp-hit{stroke:none!important;stroke-width:0!important;fill:transparent!important}.ai-crisp-axis{display:flex;flex-direction:column;justify-content:space-between;min-height:268px;color:#a9c3d0;font-size:11px;font-weight:700}.ai-crisp-axis b{color:#e3f2f7;font-size:12px}.ai-crisp-axis-left{align-items:flex-end;text-align:right}.ai-crisp-axis-right{align-items:flex-start;text-align:left}.ai-crisp-time-grid,.ai-crisp-weather-grid{display:grid;grid-template-columns:repeat(24,minmax(0,1fr));margin-left:0}.ai-crisp-time-grid{min-height:25px;align-items:start;padding-top:6px;color:#c6dbe5;font-size:10px;font-weight:800}.ai-crisp-time-grid span{text-align:center;white-space:nowrap}.ai-crisp-weather-grid{min-height:31px;border-top:1px solid rgba(104,151,174,.12);align-items:center}.ai-crisp-weather-cell{position:relative;display:flex;align-items:center;justify-content:center;min-width:0;height:30px;cursor:default}.ai-crisp-weather-cell b{font-size:18px;line-height:1;font-weight:400}.ai-crisp-weather-cell i{position:absolute;bottom:2px;width:13px;height:2px;border-radius:4px;background:#536d79;opacity:.35}.ai-crisp-weather-cell i.low{background:#65c95a;opacity:.9}.ai-crisp-weather-cell i.medium{background:#ffd166;opacity:.9}.ai-crisp-weather-cell i.high{background:#49aaff;opacity:.9}.ai-crisp-status{display:grid;grid-template-columns:74px minmax(0,1fr);align-items:center;gap:3px 8px;margin-top:4px;padding-top:5px;border-top:1px solid rgba(104,151,174,.18);font-size:10px}.ai-crisp-status>span{font-weight:800;color:#92afbd}.ai-crisp-status>div{display:grid;grid-template-columns:repeat(24,minmax(0,1fr));gap:2px;height:13px}.ai-crisp-status>div span{display:block;border-radius:3px;background:rgba(102,137,153,.12)}.ai-crisp-status>div span.active.sell{background:#69d438;box-shadow:0 0 0 1px rgba(141,233,96,.55) inset}.ai-crisp-status>div span.active.charge{background:#ffd200;box-shadow:0 0 0 1px rgba(255,227,106,.55) inset}.ai-crisp-status>div span.active.tariff{background:#9f863d;box-shadow:0 0 0 1px rgba(199,173,91,.55) inset}.ai-crisp-chart .ai-chart-tooltip{width:min(300px,calc(100% - 18px))}.ai-crisp-chart .ai-chart-help{margin:8px 1px 0}.ai-energy-48-crisp .ai-crisp-chart{margin-top:0}
            @media(max-width:980px){.ai-energy-48>.ai-support-grid{grid-template-columns:1fr}.ai-chart-v2 svg{min-width:860px}.ai-weather-facts{grid-template-columns:1fr 1fr}.ai-weather-facts span:last-child{grid-column:1/-1}.ai-crisp-chart{padding:12px 9px}.ai-crisp-layout{grid-template-columns:36px minmax(0,1fr) 31px;gap:4px}.ai-crisp-plot{height:236px}.ai-crisp-axis{min-height:236px;font-size:10px}.ai-crisp-legend{justify-content:flex-start;gap:4px 7px}.ai-crisp-legend button{font-size:10px}.ai-crisp-status{grid-template-columns:66px minmax(0,1fr);font-size:9px}.ai-crisp-svg{min-width:0!important}}
            @media(max-width:1500px){.info-grid{grid-template-columns:1fr 1fr}.info-grid>.panel:nth-child(3){grid-column:1/-1}.schedule-main.selecting{grid-template-columns:1fr}.bulk-panel{max-width:none}.mode-legend{grid-template-columns:repeat(3,minmax(0,1fr))}}
-           @media(max-width:980px){.dem-v076{padding:10px}.info-grid{grid-template-columns:1fr}.status-grid,.sales-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.info-grid>.panel{height:auto;min-height:340px}.schedule-head{display:grid}.schedule-tools{justify-content:stretch}.tool-btn{flex:1}.mode-legend{grid-template-columns:1fr 1fr}.schedule-table{min-width:1160px}.schedule-table-card{overflow-x:auto}.sales-tables{grid-template-columns:1fr}.sales-chart{overflow-x:auto;grid-template-columns:repeat(24,24px)}.price-scroll{height:260px;overflow:auto;scrollbar-gutter:stable}.solcast-days{grid-template-columns:repeat(2,1fr)}.settings-layout{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}.settings-nav{flex-direction:row;overflow-x:auto;overflow-y:hidden;border-right:0;border-bottom:1px solid var(--line)}.settings-nav button{width:auto;min-width:max-content;text-align:center}.diagnostic-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.ai-shell{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}.ai-sidebar{border-right:0;border-bottom:1px solid var(--line);padding:7px}.ai-sidebar nav{display:flex;overflow-x:auto}.ai-sidebar nav button{min-width:max-content}.ai-learning-status{display:none}.ai-overview-grid{grid-template-columns:1fr}.ai-overview-grid>.ai-chart-card{grid-column:auto}.ai-decision-grid,.ai-quality-full{grid-template-columns:1fr}.ai-support-grid{grid-template-columns:1fr}.ai-day-plan>.ai-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}}
+           @media(max-width:980px){.dem-v073{padding:10px}.info-grid{grid-template-columns:1fr}.status-grid,.sales-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.info-grid>.panel{height:auto;min-height:340px}.schedule-head{display:grid}.schedule-tools{justify-content:stretch}.tool-btn{flex:1}.mode-legend{grid-template-columns:1fr 1fr}.schedule-table{min-width:1160px}.schedule-table-card{overflow-x:auto}.sales-tables{grid-template-columns:1fr}.sales-chart{overflow-x:auto;grid-template-columns:repeat(24,24px)}.price-scroll{height:260px;overflow:auto;scrollbar-gutter:stable}.solcast-days{grid-template-columns:repeat(2,1fr)}.settings-layout{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}.settings-nav{flex-direction:row;overflow-x:auto;overflow-y:hidden;border-right:0;border-bottom:1px solid var(--line)}.settings-nav button{width:auto;min-width:max-content;text-align:center}.diagnostic-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.ai-shell{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}.ai-sidebar{border-right:0;border-bottom:1px solid var(--line);padding:7px}.ai-sidebar nav{display:flex;overflow-x:auto}.ai-sidebar nav button{min-width:max-content}.ai-learning-status{display:none}.ai-overview-grid{grid-template-columns:1fr}.ai-overview-grid>.ai-chart-card{grid-column:auto}.ai-decision-grid,.ai-quality-full{grid-template-columns:1fr}.ai-support-grid{grid-template-columns:1fr}.ai-day-plan>.ai-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}}
            @media(max-width:620px){
-             .dem-v076{padding:4px;gap:8px}.panel,.schedule-shell,.table-wrap{border-radius:7px}.panel-title{padding:10px 12px;font-size:18px}
+             .dem-v073{padding:4px;gap:8px}.panel,.schedule-shell,.table-wrap{border-radius:7px}.panel-title{padding:10px 12px;font-size:18px}
              .status-grid,.sales-summary{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px!important;padding:7px!important}.status-panel .stat,.sales-summary .stat{min-height:52px;padding:7px 8px;gap:7px}.status-panel .status-mode{grid-column:1/-1}.stat-icon{width:29px;height:29px}.stat-icon svg{width:17px;height:17px}.status-panel .stat span,.sales-summary .stat span{font-size:10px}.status-panel .stat strong,.sales-summary .stat strong{font-size:13px;line-height:1.25;white-space:normal;overflow-wrap:anywhere}
              .info-grid{gap:8px}.info-grid>.panel{min-height:0;height:auto}.price-summary{grid-template-columns:1fr}.price-scroll{height:230px}.price-table th,.price-table td{padding:4px 7px;font-size:11px}
              .solcast-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.solcast-days{display:flex;gap:6px;overflow-x:auto;scroll-snap-type:x proximity;padding-bottom:5px}.solcast-day{min-width:132px;scroll-snap-align:start}.solcast-chart{height:162px;padding-left:5px;padding-right:5px}.solcast-bars{height:138px;min-width:560px}.solcast-performance{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;padding:7px}
@@ -3689,7 +3634,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
               .overlay{padding:0;align-items:stretch}.dialog,.ai-dialog,.settings-dialog{width:100%!important;height:100dvh!important;max-height:100dvh!important;border-radius:0}.dialog-head{padding-top:max(14px,env(safe-area-inset-top))}.dialog-actions{padding-bottom:max(12px,env(safe-area-inset-bottom))}.apply-row{grid-template-columns:24px 1fr}.apply-row .field,.apply-row select{grid-column:2}.ai-grid{grid-template-columns:1fr}.ai-proposal-scroll,.ai-history-scroll{max-height:none}.history-toolbar{grid-template-columns:1fr 1fr}.history-toolbar button{width:100%}.analysis-detail-grid,.analysis-price-groups{grid-template-columns:1fr}.settings-content{padding:9px}.diagnostic-summary{grid-template-columns:1fr}.diagnostic-actions{display:grid}.diagnostic-actions button{width:100%}.ai-main{padding:10px}.ai-price-columns{grid-template-columns:1fr}.ai-kpis,.ai-day-plan>.ai-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.ai-proposal-toolbar{align-items:stretch;flex-direction:column}.ai-day-tabs,.ai-view-tools{display:grid;grid-template-columns:1fr 1fr}.ai-decision-grid{grid-template-columns:1fr}.ai-chart-card{padding:9px}.ai-chart-card svg{min-width:620px}.ai-chart-card{overflow-x:auto}.ai-crisp-chart svg{min-width:0!important}.ai-crisp-chart{overflow:visible}
            }
         </style>
-        <div class="dem-v076">
+        <div class="dem-v073">
           <section class="panel status-panel">
             <h2 class="panel-title">${this.iconSvg("chart")} Status energii</h2>
             <div class="status-grid">
@@ -3759,7 +3704,6 @@ class DeyeEnergyManagerCard extends HTMLElement {
             <div class="schedule-main ${this._selectionMode ? "selecting" : ""}">
               <div class="schedule-left">
                 <div class="mode-legend">${this.modeLegend()}</div>
-                <div class="mode-tooltip" data-mode-tooltip></div>
                 <div class="schedule-table-card">
                   <table class="schedule-table">
                     <colgroup>
@@ -3901,26 +3845,6 @@ class DeyeEnergyManagerCard extends HTMLElement {
       }
       this.render();
     }));
-    const modeTooltip = this.querySelector("[data-mode-tooltip]");
-    this.querySelectorAll("[data-mode-info]").forEach((el) => {
-      const showTooltip = () => {
-        if (!modeTooltip) return;
-        modeTooltip.innerHTML = this.modeInfoTooltip(el.dataset.modeInfo);
-        modeTooltip.classList.add("visible");
-        const rect = el.getBoundingClientRect();
-        const container = this.getBoundingClientRect();
-        let left = rect.left - container.left + rect.width / 2 - modeTooltip.offsetWidth / 2;
-        let top = rect.bottom - container.top + 8;
-        if (left < 8) left = 8;
-        if (left + modeTooltip.offsetWidth > container.width - 8) left = container.width - modeTooltip.offsetWidth - 8;
-        modeTooltip.style.left = `${left}px`;
-        modeTooltip.style.top = `${top}px`;
-      };
-      const hideTooltip = () => modeTooltip?.classList.remove("visible");
-      el.addEventListener("mouseenter", showTooltip);
-      el.addEventListener("mouseleave", hideTooltip);
-      el.addEventListener("click", showTooltip);
-    });
     this.querySelectorAll("[data-toggle-selection]").forEach((el) => el.addEventListener("click", () => {
       this._selectionMode = !this._selectionMode;
       this._selectedSlots.clear();

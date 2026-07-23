@@ -60,8 +60,7 @@
 - Wprowadzono logiczny tryb harmonogramu **Normalna Praca**, który w backendzie mapuje się na fizyczny `Zero Export To Load` lub `Zero Export To CT`; selektor slotów pokazuje teraz tylko trzy tryby: `Selling First`, `Normalna Praca` i `Charge`.
 - Dodano szablon **Ustawienia normalnej pracy** (fizyczny tryb Deye, moc sprzedaży, prądy, SOC TOU) kopiowany do slotu przy jego pierwszym wyborze lub przy ręcznym ponownym wczytaniu; późniejsze zmiany szablonu nie nadpisują istniejących slotów.
 - Tabela harmonogramu pokazuje zgodę **Ładowanie z sieci** jako **tak** albo **nie** dla trybu `Charge`, a dla pozostałych trybów jako **nie dotyczy**; nie wyświetla błędnego stanu **brak**.
-- Obie dystrybuowane kopie karty mają identyczną zawartość i rewizję zasobu `v=0780`.
-- Karta: cache `v=0780`, klasa CSS `dem-v075`. W sekcji **Ustawienia normalnej pracy** zmieniono etykietę `SOC baterii Deye (TOU)` na `Minimalny SOC`; pole jest zawsze edytowalne dzięki zapasowym zakresom `min/max/step` i nigdy nie jest blokowane przez brak aktualnego stanu encji.
+- Obie dystrybuowane kopie karty mają identyczną zawartość i rewizję zasobu `v=0777`.
 - Poprawiono zabezpieczanie dynamicznych wartości HTML.
 - Usunięto błędnie wyświetlane encje numeryczne HTML, m.in. w nazwie strategii „Zrównoważony”.
 - Dodano zakładkę `Taryfa i dystrybucja` z wyborem operatora, taryfy i trybu katalogu, jawnym przyciskiem zapisu, diagnostyką aktualizacji oraz profilem 48h dla dziś i jutra.

@@ -126,9 +126,7 @@ class FrontendDefaultRestoreTests(unittest.TestCase):
     def test_documentation_uses_current_card_cache_revision(self):
         for name in ("README.md", "INSTALL_PL.md"):
             source = (ROOT / name).read_text(encoding="utf-8")
-            self.assertIn("deye-energy-manager-card.js?v=0780", source)
-            self.assertNotIn("deye-energy-manager-card.js?v=0778", source)
-            self.assertNotIn("deye-energy-manager-card.js?v=0777", source)
+            self.assertIn("deye-energy-manager-card.js?v=0777", source)
             self.assertNotIn("deye-energy-manager-card.js?v=0774", source)
             self.assertNotIn("deye-energy-manager-card.js?v=0773", source)
             self.assertNotIn("deye-energy-manager-card.js?v=0772", source)
@@ -228,22 +226,6 @@ class FrontendDefaultRestoreTests(unittest.TestCase):
         )
         self.assertIn("physical_work_mode", method)
         self.assertIn("tou_soc", method)
-
-    def test_normal_profile_input_allows_editing_when_entity_state_is_empty(self):
-        method = extract_method(self.sources[0], "normalProfileInput(name, entityId, unit = \"\")")
-        self.assertNotIn("current !== \"\"", method)
-        self.assertNotIn("disabled", method)
-        self.assertIn("fallback", method)
-        self.assertIn('name === "tou_soc"', method)
-
-    def test_normal_profile_section_uses_minimum_soc_label(self):
-        source = self.sources[0]
-        dialog = extract_method(source, "renderDialog(slots, touStarts)")
-        start = dialog.index("Ustawienia normalnej pracy")
-        end = dialog.index("} else if (tab === \"tou\")", start)
-        normal_section = dialog[start:end]
-        self.assertIn('this.row("Minimalny SOC"', normal_section)
-        self.assertNotIn('this.row("SOC baterii Deye (TOU)"', normal_section)
 
     def test_normal_profile_reload_button_calls_apply_schedule_patch_with_force_flag(self):
         source = self.sources[0]
