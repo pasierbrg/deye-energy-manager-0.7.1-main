@@ -3473,27 +3473,22 @@ class DeyeEnergyManagerRuntime:
             raise ValueError(
                 "Fizyczny tryb Deye musi być Zero Export To Load albo Zero Export To CT"
             )
-        numeric = {
-            "normal_profile_sell_power": self.safe_float(values.get("sell_power"), float("nan")),
-            "normal_profile_discharge_current": self.safe_float(values.get("discharge_current"), float("nan")),
-            "normal_profile_charge_current": self.safe_float(values.get("charge_current"), float("nan")),
-            "normal_profile_grid_charge_current": self.safe_float(values.get("grid_charge_current"), float("nan")),
-            "normal_profile_tou_soc": self.safe_float(values.get("tou_soc"), float("nan")),
-        }
         profile_entities = {
-            "normal_profile_sell_power": ("Max Sell Power", self.max_sell_power_number),
-            "normal_profile_discharge_current": ("Maximum Battery Discharge Current", self.discharge_current_number),
-            "normal_profile_charge_current": ("Maximum Battery Charge Current", self.charge_current_number),
-            "normal_profile_grid_charge_current": ("Maximum Battery Grid Charge Current", self.grid_charge_current_number),
-            "normal_profile_tou_soc": ("Deye Time Of Use SOC", self._tou_entity(1, "soc")),
+            "normal_profile_sell_power": ("sell_power", "Max Sell Power", self.max_sell_power_number),
+            "normal_profile_discharge_current": ("discharge_current", "Maximum Battery Discharge Current", self.discharge_current_number),
+            "normal_profile_charge_current": ("charge_current", "Maximum Battery Charge Current", self.charge_current_number),
+            "normal_profile_grid_charge_current": ("grid_charge_current", "Maximum Battery Grid Charge Current", self.grid_charge_current_number),
+            "normal_profile_tou_soc": ("tou_soc", "Deye Time Of Use SOC", self._tou_entity(1, "soc")),
         }
+        numeric = {}
+        for runtime_key, (input_key, label, entity_id) in profile_entities.items():
+            if input_key in values:
+                value = self.safe_float(values.get(input_key), float("nan"))
+                self._validate_number_entity(label, entity_id, value)
+                numeric[runtime_key] = value
         self._validate_select_entity("System Work Mode", self.work_mode_select, physical_mode)
-        for key, value in numeric.items():
-            self._validate_number_entity(*profile_entities[key], value)
-        previous = {
-            key: getattr(self, key)
-            for key in ("normal_profile_physical_work_mode", *numeric)
-        }
+        all_keys = ("normal_profile_physical_work_mode", *profile_entities)
+        previous = {key: getattr(self, key) for key in all_keys}
         previous_loaded = self._normal_profile_loaded_from_store
         previous_saved_at = self.last_saved_at
         self.normal_profile_physical_work_mode = physical_mode
@@ -3505,7 +3500,7 @@ class DeyeEnergyManagerRuntime:
             await self.async_save_ai_data()
         except Exception:
             self.normal_profile_physical_work_mode = previous["normal_profile_physical_work_mode"]
-            for key in numeric:
+            for key in profile_entities:
                 setattr(self, key, previous[key])
             self._normal_profile_loaded_from_store = previous_loaded
             self.last_saved_at = previous_saved_at

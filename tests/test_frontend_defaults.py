@@ -126,7 +126,8 @@ class FrontendDefaultRestoreTests(unittest.TestCase):
     def test_documentation_uses_current_card_cache_revision(self):
         for name in ("README.md", "INSTALL_PL.md"):
             source = (ROOT / name).read_text(encoding="utf-8")
-            self.assertIn("deye-energy-manager-card.js?v=0777", source)
+            self.assertIn("deye-energy-manager-card.js?v=0778", source)
+            self.assertNotIn("deye-energy-manager-card.js?v=0777", source)
             self.assertNotIn("deye-energy-manager-card.js?v=0774", source)
             self.assertNotIn("deye-energy-manager-card.js?v=0773", source)
             self.assertNotIn("deye-energy-manager-card.js?v=0772", source)
@@ -226,6 +227,39 @@ class FrontendDefaultRestoreTests(unittest.TestCase):
         )
         self.assertIn("physical_work_mode", method)
         self.assertIn("tou_soc", method)
+
+    def test_normal_profile_form_falls_back_to_persisted_manager_status(self):
+        source = self.sources[0]
+        self.assertIn('this.entity("sensor", "manager_status")', source)
+        self.assertIn("attributes?.normal_profile", source)
+        self.assertIn("this.normalProfileStoredValues()[profileKey]", source)
+
+    def test_normal_profile_input_never_disabled_and_uses_fallback_ranges(self):
+        method = extract_method(self.sources[0], "normalProfileInput(name, entityId, unit = \"\")")
+        self.assertNotIn("disabled", method)
+        self.assertIn("fallback", method)
+        self.assertIn("min", method)
+        self.assertIn("max", method)
+        self.assertIn("step", method)
+
+    def test_normal_profile_mode_prefers_draft_then_stored_then_entity(self):
+        method = extract_method(self.sources[0], "normalProfileMode()")
+        self.assertIn("this._normalProfileDraft.physical_work_mode", method)
+        self.assertIn("this.normalProfileStoredValues().physical_work_mode", method)
+        self.assertIn('this.entity("select", "normal_profile_mode")', method)
+
+    def test_normal_profile_mode_select_has_placeholder(self):
+        source = self.sources[0]
+        dialog = extract_method(source, "renderDialog(slots, touStarts)")
+        self.assertIn("this.normalProfileMode()", dialog)
+        self.assertIn('["", "-- wybierz --"]', dialog)
+        self.assertIn('["Zero Export To Load", "Zero Export To Load"]', dialog)
+        self.assertIn('["Zero Export To CT", "Zero Export To CT"]', dialog)
+
+    def test_normal_profile_save_rejects_empty_values(self):
+        method = extract_method(self.sources[0], "async saveNormalProfile()")
+        self.assertIn('raw === ""', method)
+        self.assertIn('this.failSave("normal_profile"', method)
 
     def test_normal_profile_reload_button_calls_apply_schedule_patch_with_force_flag(self):
         source = self.sources[0]

@@ -23,13 +23,13 @@ Automatyczne mapowanie niczego nie zapisuje bez końcowego potwierdzenia. Kreato
 Dodaj zasób JavaScript:
 
 ```text
-/deye_energy_manager/deye-energy-manager-card.js?v=0777
+/deye_energy_manager/deye-energy-manager-card.js?v=0778
 ```
 
 Przy instalacji ręcznej użyj:
 
 ```text
-/local/deye-energy-manager-card.js?v=0777
+/local/deye-energy-manager-card.js?v=0778
 ```
 
 Następnie dodaj kartę ręczną:
@@ -74,7 +74,7 @@ Prognoza pogody jest opcjonalnym wsparciem Solcast. Jeżeli `weather.forecast_ho
 
 Tryb ręczny pozwala wpisać własne stawki i przedziały tanich godzin. W trybie automatycznym pory roku, weekendy oraz polskie dni ustawowo wolne wynikają z wybranego profilu OSD. Katalog nie zastępuje umowy — przed uruchomieniem ładowania z sieci porównaj wybrane dane z dokumentami operatora.
 
-Po ręcznym skopiowaniu nowej karty do `/config/www/` użyj zasobu `/local/deye-energy-manager-card.js?v=0777`, przeładuj zasoby Lovelace i wykonaj `Ctrl + F5`. Jeśli korzystasz z karty dostarczanej przez integrację, użyj adresu `/deye_energy_manager/deye-energy-manager-card.js?v=0777`.
+Po ręcznym skopiowaniu nowej karty do `/config/www/` użyj zasobu `/local/deye-energy-manager-card.js?v=0778`, przeładuj zasoby Lovelace i wykonaj `Ctrl + F5`. Jeśli korzystasz z karty dostarczanej przez integrację, użyj adresu `/deye_energy_manager/deye-energy-manager-card.js?v=0778`.
 
 Plan na jutro wymaga ręcznego zaznaczenia godzin i potwierdzenia przyciskiem **Zaplanuj wybrane na jutro**. Plan jest zapisany z datą i pozostaje oczekujący po restarcie Home Assistant. W dniu wykonania integracja sprawdza encje sterujące oraz tylko SOC i ceny wymagane przez zatwierdzony slot `Selling First`, po czym stosuje dokładnie zaakceptowane pozycje. Nie tworzy planu zastępczego. W razie błędu plan jest oznaczony jako nieudany, a falownik otrzymuje pełne **Ustawienia domyślne** 1:1.
 

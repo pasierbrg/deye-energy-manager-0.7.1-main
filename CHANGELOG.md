@@ -11,6 +11,8 @@
 - Diagnostyka pokazuje osobno `required_entities_complete` oraz oznacza, czy encja została wybrana ręcznie, czy jest domyślną.
 - Uporządkowano `_async_tick_impl` tak, aby powiadomienie o zmianie statystyk sprzedaży było wysyłane niezależnie od ścieżki sterowania, bez ryzyka pominięcia przy wcześniejszym `return`.
 - Usługa `apply_settings` obsługuje opcjonalny parametr `grid_charge_current`. Po pominięciu używana jest wartość domyślna; dodatnia wartość nie włącza automatycznie Grid Charge, jest wyłącznie limitem prądu.
+- Naprawiono formularz **Ustawienia normalnej pracy**: pole `tou_soc` jest zawsze edytowalne, a wybór trybu fizycznego nie powraca do `Zero Export To Load`. Wartości są odczytywane kolejno z: szkicu użytkownika, zapisanego profilu w atrybutach `manager_status`, stanu encji. Przy braku wartości wyświetlany jest pusty placeholder wymagający świadomego wyboru. Zapisanie pustego pola jest odrzucane, a brakujące `tou_soc` nie jest automatycznie uzupełniane jako 100 ani jako inna wartość SOC.
+- Usługa `save_normal_profile` akceptuje teraz częściowe aktualizacje: zmiana tylko trybu fizycznego przez encję `select.normal_profile_mode` nie nadpisuje pozostałych parametrów szablonu.
 
 ### Bezpieczeństwo
 

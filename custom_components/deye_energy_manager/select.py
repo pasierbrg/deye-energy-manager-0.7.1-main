@@ -72,11 +72,6 @@ class DeyeNormalProfileModeSelect(DeyeEnergyManagerEntity, SelectEntity, Restore
     async def async_select_option(self, option: str):
         await self.runtime.async_save_normal_profile({
             "physical_work_mode": option,
-            "sell_power": self.runtime.normal_profile_sell_power,
-            "discharge_current": self.runtime.normal_profile_discharge_current,
-            "charge_current": self.runtime.normal_profile_charge_current,
-            "grid_charge_current": self.runtime.normal_profile_grid_charge_current,
-            "tou_soc": self.runtime.normal_profile_tou_soc or 100,
         })
         self.runtime.mark_config_saved()
 

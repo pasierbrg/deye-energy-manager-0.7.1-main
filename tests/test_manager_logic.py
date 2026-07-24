@@ -1078,6 +1078,28 @@ class NormalProfileTests(unittest.TestCase):
                 "tou_soc": 50,
             }))
 
+    def test_save_normal_profile_partial_update_preserves_existing_tou_soc(self):
+        runtime = make_runtime()
+        self.configure_normal_profile(runtime)
+        asyncio.run(runtime.async_save_normal_profile({
+            "physical_work_mode": const.MODE_ZERO_EXPORT,
+        }))
+        self.assertEqual(runtime.normal_profile_physical_work_mode, const.MODE_ZERO_EXPORT)
+        self.assertEqual(runtime.normal_profile_tou_soc, 75)
+        self.assertEqual(runtime.normal_profile_sell_power, 2500)
+
+    def test_save_normal_profile_rejects_explicit_nan_tou_soc(self):
+        runtime = make_runtime()
+        with self.assertRaises(ValueError):
+            asyncio.run(runtime.async_save_normal_profile({
+            "physical_work_mode": const.MODE_ZERO_EXPORT,
+                "sell_power": 1000,
+                "discharge_current": 50,
+                "charge_current": 50,
+                "grid_charge_current": 10,
+                "tou_soc": None,
+            }))
+
 
 class TouSocMappingTests(unittest.TestCase):
     """Regression coverage for logical SOC versus physical Deye TOU SOC."""

@@ -925,6 +925,40 @@ class DeyeEnergyManagerCard extends HTMLElement {
     return Boolean(this.chargeProfileStoredValues().grid_charge_enabled);
   }
 
+  normalProfileStoredValues() {
+    const statusId = this.entity("sensor", "manager_status");
+    const profile = this._hass?.states?.[statusId]?.attributes?.normal_profile;
+    return profile && typeof profile === "object" ? profile : {};
+  }
+
+  normalProfileNumericValue(entitySuffix, profileKey) {
+    const entityId = this.entity("number", entitySuffix);
+    const state = this.displayState(entityId, "");
+    const known = state && !["unknown", "unavailable", "None", "null"].includes(state);
+    if (known) return state;
+    const stored = this.normalProfileStoredValues()[profileKey];
+    return Number.isFinite(Number(stored)) ? String(stored) : "";
+  }
+
+  normalProfileValues() {
+    return {
+      sellPower: this.normalProfileNumericValue("normal_profile_sell_power", "sell_power"),
+      dischargeCurrent: this.normalProfileNumericValue("normal_profile_discharge_current", "discharge_current"),
+      chargeCurrent: this.normalProfileNumericValue("normal_profile_charge_current", "charge_current"),
+      gridChargeCurrent: this.normalProfileNumericValue("normal_profile_grid_charge_current", "grid_charge_current"),
+      touSoc: this.normalProfileNumericValue("normal_profile_tou_soc", "tou_soc"),
+    };
+  }
+
+  normalProfileMode() {
+    const draft = this._normalProfileDraft.physical_work_mode;
+    if (draft) return draft;
+    const stored = this.normalProfileStoredValues().physical_work_mode;
+    if (stored) return stored;
+    const state = this.displayState(this.entity("select", "normal_profile_mode"), "");
+    return state && !["unknown", "unavailable", "None", "null"].includes(state) ? state : "";
+  }
+
   chargeProfileValues() {
     return {
       chargeCurrent: this.chargeProfileNumericValue("charge_profile_charge_current", "charge_current"),
@@ -1115,7 +1149,12 @@ class DeyeEnergyManagerCard extends HTMLElement {
     const fields = [...this.querySelectorAll("[data-normal-profile-number]")];
     const values = { physical_work_mode };
     for (const field of fields) {
-      const value = Number(String(field.value).replace(",", "."));
+      const raw = String(field.value).trim();
+      if (raw === "") {
+        this.failSave("normal_profile", new Error("Wprowadź poprawne wartości profilu normalnej pracy"));
+        return false;
+      }
+      const value = Number(raw.replace(",", "."));
       if (!Number.isFinite(value)) {
         this.failSave("normal_profile", new Error("Wprowadź poprawne wartości profilu normalnej pracy"));
         return false;
@@ -1279,15 +1318,33 @@ class DeyeEnergyManagerCard extends HTMLElement {
   }
 
   normalProfileInput(name, entityId, unit = "") {
-    const entity = this._hass.states[entityId];
-    const current = entity && !["unknown", "unavailable"].includes(entity.state) ? entity.state : "";
+    const profile = this.normalProfileValues();
+    const profileKeys = {
+      sell_power: "sellPower",
+      discharge_current: "dischargeCurrent",
+      charge_current: "chargeCurrent",
+      grid_charge_current: "gridChargeCurrent",
+      tou_soc: "touSoc",
+    };
+    const fallback = {
+      sell_power: { min: 0, max: 13000, step: 1 },
+      discharge_current: { min: 0, max: 240, step: 0.1 },
+      charge_current: { min: 0, max: 240, step: 0.1 },
+      grid_charge_current: { min: 0, max: 240, step: 0.1 },
+      tou_soc: { min: 0, max: 100, step: 1 },
+    };
+    const current = profile[profileKeys[name]];
     const value = Object.prototype.hasOwnProperty.call(this._normalProfileDraft, name)
       ? this._normalProfileDraft[name] : current;
-    const min = Number(entity?.attributes?.min);
-    const max = Number(entity?.attributes?.max);
-    const step = Number(entity?.attributes?.step);
-    const range = Number.isFinite(min) && Number.isFinite(max) && Number.isFinite(step) && step > 0;
-    return `<label class="field"><input data-normal-profile-number="${this.escapeHtml(name)}" type="number" inputmode="decimal" value="${this.escapeHtml(value)}" ${range ? `min="${min}" max="${max}" step="${step}"` : ""} ${this.exists(entityId) && current !== "" && range ? "" : "disabled"}><span>${this.escapeHtml(unit)}</span></label>`;
+    const entity = this._hass.states[entityId];
+    const rawMin = Number(entity?.attributes?.min);
+    const rawMax = Number(entity?.attributes?.max);
+    const rawStep = Number(entity?.attributes?.step);
+    const fb = fallback[name] || { min: 0, max: 100, step: 1 };
+    const min = Number.isFinite(rawMin) ? rawMin : fb.min;
+    const max = Number.isFinite(rawMax) ? rawMax : fb.max;
+    const step = Number.isFinite(rawStep) && rawStep > 0 ? rawStep : fb.step;
+    return `<label class="field"><input data-normal-profile-number="${this.escapeHtml(name)}" type="number" inputmode="decimal" value="${this.escapeHtml(value ?? "")}" min="${min}" max="${max}" step="${step}"><span>${this.escapeHtml(unit)}</span></label>`;
   }
 
   async saveDefaultSettings() {
@@ -3256,7 +3313,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
           <button class="wide-action" data-save-charge-profile="1">Zapisz ustawienia ładowania</button>
           <h3>Ustawienia normalnej pracy</h3>
           <div class="hint">Ten szablon jest kopiowany do slotu tylko w chwili wybrania trybu <strong>Normalna Praca</strong>. Późniejsze ręczne zmiany w danym slocie mają pierwszeństwo i nie są automatycznie nadpisywane zmianami szablonu.</div>
-          ${this.row("Tryb normalnej pracy", this.rawSelect("normal-profile-mode", ["Zero Export To Load", "Zero Export To CT"], this.state(this.entity("select", "normal_profile_mode"))))}
+          ${this.row("Tryb normalnej pracy", this.rawSelect("normal-profile-mode", [["", "-- wybierz --"], ["Zero Export To Load", "Zero Export To Load"], ["Zero Export To CT", "Zero Export To CT"]], this.normalProfileMode()))}
           ${this.row("Maksymalna moc sprzedaży", this.normalProfileInput("sell_power", this.entity("number", "normal_profile_sell_power"), "W"))}
           ${this.row("Maksymalny prąd rozładowania", this.normalProfileInput("discharge_current", this.entity("number", "normal_profile_discharge_current"), "A"))}
           ${this.row("Maksymalny prąd ładowania baterii", this.normalProfileInput("charge_current", this.entity("number", "normal_profile_charge_current"), "A"))}
