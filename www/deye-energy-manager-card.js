@@ -7,6 +7,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
     this._chargeProfileDraft = {};
     this._chargeProfileGridDraft = null;
     this._normalProfileDraft = {};
+    this._normalProfilePending = null;
     this._defaultSettingsDraft = {};
     this._scrollTops = {};
     this._pageScrollTops = [];
@@ -226,6 +227,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
 
   updateDynamicValues() {
     if (!this._hass || !this._isRendered) return;
+    this.checkNormalProfilePending();
     const slots = this.scheduleSlots();
     const statusEntity = this.entity("sensor", "manager_status");
     const activeSlotEntity = this.entity("sensor", "active_slot");
@@ -366,6 +368,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
       if (salesHourly) this.attachScrollHandlers(salesHourly);
     }
     this.updateToggleButtons();
+    this.syncNormalProfileControls();
   }
 
   updatePriceTable(scrollKey, todayEntity, tomorrowEntity, threshold = 0, highIsGood = true) {
@@ -931,13 +934,33 @@ class DeyeEnergyManagerCard extends HTMLElement {
     return profile && typeof profile === "object" ? profile : {};
   }
 
+  _numericOrNull(value) {
+    if (value === null || value === undefined) return null;
+    const str = String(value).trim();
+    if (str === "") return null;
+    const lower = str.toLowerCase();
+    if (lower === "unknown" || lower === "unavailable" || lower === "none" || lower === "null") return null;
+    const num = Number(str.replace(",", "."));
+    return Number.isFinite(num) ? num : null;
+  }
+
   normalProfileNumericValue(entitySuffix, profileKey) {
+    const draft = this._normalProfileDraft[profileKey];
+    if (Object.prototype.hasOwnProperty.call(this._normalProfileDraft, profileKey)) {
+      const draftNum = this._numericOrNull(draft);
+      return draftNum !== null ? String(draftNum) : "";
+    }
+    if (this._normalProfilePending) {
+      const pendingNum = this._numericOrNull(this._normalProfilePending[profileKey]);
+      if (pendingNum !== null) return String(pendingNum);
+    }
     const entityId = this.entity("number", entitySuffix);
     const state = this.displayState(entityId, "");
     const known = state && !["unknown", "unavailable", "None", "null"].includes(state);
     if (known) return state;
     const stored = this.normalProfileStoredValues()[profileKey];
-    return Number.isFinite(Number(stored)) ? String(stored) : "";
+    const storedNum = this._numericOrNull(stored);
+    return storedNum !== null ? String(storedNum) : "";
   }
 
   normalProfileValues() {
@@ -953,10 +976,55 @@ class DeyeEnergyManagerCard extends HTMLElement {
   normalProfileMode() {
     const draft = this._normalProfileDraft.physical_work_mode;
     if (draft) return draft;
+    const pending = this._normalProfilePending?.physical_work_mode;
+    if (pending) return pending;
     const stored = this.normalProfileStoredValues().physical_work_mode;
     if (stored) return stored;
     const state = this.displayState(this.entity("select", "normal_profile_mode"), "");
     return state && !["unknown", "unavailable", "None", "null"].includes(state) ? state : "";
+  }
+
+  _normalProfilePendingMatches(statusProfile) {
+    if (!this._normalProfilePending || !statusProfile || typeof statusProfile !== "object") return false;
+    const keys = ["physical_work_mode", "sell_power", "discharge_current", "charge_current", "grid_charge_current", "tou_soc"];
+    for (const key of keys) {
+      const pending = this._normalProfilePending[key];
+      const stored = statusProfile[key];
+      if (key === "physical_work_mode") {
+        if (pending !== stored) return false;
+      } else {
+        const pendingNum = this._numericOrNull(pending);
+        const storedNum = this._numericOrNull(stored);
+        if (pendingNum === null && storedNum === null) continue;
+        if (pendingNum === null || storedNum === null) return false;
+        if (Math.abs(pendingNum - storedNum) > 0.05) return false;
+      }
+    }
+    return true;
+  }
+
+  checkNormalProfilePending() {
+    if (!this._normalProfilePending) return;
+    const statusId = this.entity("sensor", "manager_status");
+    const statusProfile = this._hass?.states?.[statusId]?.attributes?.normal_profile;
+    if (statusProfile && typeof statusProfile === "object" && this._normalProfilePendingMatches(statusProfile)) {
+      this._normalProfilePending = null;
+    }
+  }
+
+  syncNormalProfileControls() {
+    if (!this._dialog || this._dialog.type !== "settings") return;
+    const modeSelect = this.querySelector('[data-raw="normal-profile-mode"]');
+    if (modeSelect && !this._normalProfileDraft.physical_work_mode) {
+      const value = this.normalProfileMode();
+      if (value && modeSelect.value !== value) modeSelect.value = value;
+    }
+    this.querySelectorAll("[data-normal-profile-number]").forEach((el) => {
+      const key = el.dataset.normalProfileNumber;
+      if (Object.prototype.hasOwnProperty.call(this._normalProfileDraft, key)) return;
+      const value = this.normalProfileNumericValue(`normal_profile_${key}`, key);
+      if (value !== el.value) el.value = value;
+    });
   }
 
   chargeProfileValues() {
@@ -1165,6 +1233,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
       this.failSave("normal_profile", new Error("Brak poprawnej wartości SOC baterii Deye TOU"));
       return false;
     }
+    this._normalProfilePending = { ...values };
     this.beginSave();
     try {
       await this.callService("deye_energy_manager", "save_normal_profile", values);
@@ -1174,6 +1243,7 @@ class DeyeEnergyManagerCard extends HTMLElement {
       this.render();
       return true;
     } catch (error) {
+      this._normalProfilePending = null;
       this.failSave("normal_profile", error);
       return false;
     }

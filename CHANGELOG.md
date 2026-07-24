@@ -13,6 +13,7 @@
 - Usługa `apply_settings` obsługuje opcjonalny parametr `grid_charge_current`. Po pominięciu używana jest wartość domyślna; dodatnia wartość nie włącza automatycznie Grid Charge, jest wyłącznie limitem prądu.
 - Naprawiono formularz **Ustawienia normalnej pracy**: pole `tou_soc` jest zawsze edytowalne, a wybór trybu fizycznego nie powraca do `Zero Export To Load`. Wartości są odczytywane kolejno z: szkicu użytkownika, zapisanego profilu w atrybutach `manager_status`, stanu encji. Przy braku wartości wyświetlany jest pusty placeholder wymagający świadomego wyboru. Zapisanie pustego pola jest odrzucane, a brakujące `tou_soc` nie jest automatycznie uzupełniane jako 100 ani jako inna wartość SOC.
 - Usługa `save_normal_profile` akceptuje teraz częściowe aktualizacje: zmiana tylko trybu fizycznego przez encję `select.normal_profile_mode` nie nadpisuje pozostałych parametrów szablonu.
+- Etap 5.1: naprawiono synchronizację formularza **Ustawienia normalnej pracy**. Wartości `null`/`undefined`/pusty ciąg dla `tou_soc` nie są już konwertowane na `0`. Wprowadzono stan oczekujący `_normalProfilePending` przechowujący wartości wysłane do backendu; formularz pokazuje je do czasu potwierdzenia przez atrybut `normal_profile` w `sensor.manager_status`. Otwarte okno ustawień synchronizuje kontrolki przy aktualizacjach `hass`, nie nadpisując aktywnego szkicu użytkownika. Wybór `Zero Export To CT` i wpisane wartości SOC pozostają widoczne po zapisie, a stary stan encji pomocniczej nie ma już pierwszeństwa.
 
 ### Bezpieczeństwo
 
@@ -72,7 +73,7 @@
 - Wprowadzono logiczny tryb harmonogramu **Normalna Praca**, który w backendzie mapuje się na fizyczny `Zero Export To Load` lub `Zero Export To CT`; selektor slotów pokazuje teraz tylko trzy tryby: `Selling First`, `Normalna Praca` i `Charge`.
 - Dodano szablon **Ustawienia normalnej pracy** (fizyczny tryb Deye, moc sprzedaży, prądy, SOC TOU) kopiowany do slotu przy jego pierwszym wyborze lub przy ręcznym ponownym wczytaniu; późniejsze zmiany szablonu nie nadpisują istniejących slotów.
 - Tabela harmonogramu pokazuje zgodę **Ładowanie z sieci** jako **tak** albo **nie** dla trybu `Charge`, a dla pozostałych trybów jako **nie dotyczy**; nie wyświetla błędnego stanu **brak**.
-- Obie dystrybuowane kopie karty mają identyczną zawartość i rewizję zasobu `v=0777`.
+- Obie dystrybuowane kopie karty mają identyczną zawartość i rewizję zasobu `v=0779`.
 - Poprawiono zabezpieczanie dynamicznych wartości HTML.
 - Usunięto błędnie wyświetlane encje numeryczne HTML, m.in. w nazwie strategii „Zrównoważony”.
 - Dodano zakładkę `Taryfa i dystrybucja` z wyborem operatora, taryfy i trybu katalogu, jawnym przyciskiem zapisu, diagnostyką aktualizacji oraz profilem 48h dla dziś i jutra.

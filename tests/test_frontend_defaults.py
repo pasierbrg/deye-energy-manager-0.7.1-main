@@ -126,7 +126,8 @@ class FrontendDefaultRestoreTests(unittest.TestCase):
     def test_documentation_uses_current_card_cache_revision(self):
         for name in ("README.md", "INSTALL_PL.md"):
             source = (ROOT / name).read_text(encoding="utf-8")
-            self.assertIn("deye-energy-manager-card.js?v=0778", source)
+            self.assertIn("deye-energy-manager-card.js?v=0779", source)
+            self.assertNotIn("deye-energy-manager-card.js?v=0778", source)
             self.assertNotIn("deye-energy-manager-card.js?v=0777", source)
             self.assertNotIn("deye-energy-manager-card.js?v=0774", source)
             self.assertNotIn("deye-energy-manager-card.js?v=0773", source)
