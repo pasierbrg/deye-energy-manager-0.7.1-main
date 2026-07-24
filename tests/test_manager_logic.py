@@ -222,6 +222,21 @@ class SafetyTests(unittest.TestCase):
     def test_default_control_confirmation_window_is_12_seconds(self):
         self.assertEqual(make_runtime().control_confirmation_timeout, 12.0)
 
+    def test_required_entities_complete_includes_battery_soc(self):
+        runtime = make_runtime()
+        self.assertTrue(runtime.required_entities_complete)
+
+    def test_required_entities_complete_false_when_soc_missing(self):
+        runtime = make_runtime(soc=None)
+        self.assertFalse(runtime.required_entities_complete)
+        self.assertTrue(runtime.data_available)
+
+    def test_required_entities_complete_false_when_charge_current_missing(self):
+        runtime = make_runtime()
+        del runtime.hass.states.values[const.DEFAULT_CHARGE_CURRENT]
+        self.assertFalse(runtime.required_entities_complete)
+        self.assertFalse(runtime.data_available)
+
     def test_missing_soc_blocks_selling(self):
         runtime = make_runtime(soc=None)
         self.assertTrue(runtime.data_available)
@@ -259,6 +274,33 @@ class SafetyTests(unittest.TestCase):
         active.min_sell_price = 0.2
         self.assertTrue(runtime.data_available)
         self.assertFalse(runtime.price_ok)
+
+
+class NotifyUpdateTests(unittest.TestCase):
+    def test_tick_notifies_on_stats_change_with_active_slot(self):
+        runtime = make_runtime()
+        runtime.scheduler_enabled = True
+        active = runtime.slots[runtime.active_slot_key()]
+        active.enabled = True
+        active.mode = const.MODE_ZERO_EXPORT
+        active.physical_work_mode = const.MODE_ZERO_EXPORT
+        active.sell_power = 0
+        active.discharge_current = 0
+        active.charge_current = 0
+        active.grid_charge_current = 0
+        active.tou_soc = 20
+        counts = []
+        original_notify = runtime.notify_update
+
+        def counting_notify():
+            counts.append(None)
+            original_notify()
+
+        runtime.notify_update = counting_notify
+        runtime.sold_energy_today = 1.0
+        runtime.sold_value_today = 1.0
+        asyncio.run(runtime._async_tick_impl())
+        self.assertGreaterEqual(len(counts), 1)
 
 
 class MappingAndTransactionTests(unittest.TestCase):
@@ -400,6 +442,22 @@ class MappingAndTransactionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             asyncio.run(runtime.async_apply_settings(const.MODE_SELLING_FIRST, 5000, 120, 0))
         self.assert_safe_defaults(runtime)
+
+    def test_apply_settings_uses_custom_grid_charge_current(self):
+        runtime = make_runtime()
+        runtime.default_grid_charge_current = 30
+        asyncio.run(runtime.async_apply_settings(const.MODE_ZERO_EXPORT, 0, 120, 120, 60))
+        grid_calls = [call for call in runtime.hass.services.calls if call[:2] == ("number", "set_value") and call[2].get("entity_id") == const.DEFAULT_GRID_CHARGE_CURRENT]
+        self.assertTrue(grid_calls)
+        self.assertEqual(grid_calls[-1][2]["value"], 60)
+
+    def test_apply_settings_uses_default_grid_charge_current_when_omitted(self):
+        runtime = make_runtime()
+        runtime.default_grid_charge_current = 45
+        asyncio.run(runtime.async_apply_settings(const.MODE_ZERO_EXPORT, 0, 120, 120))
+        grid_calls = [call for call in runtime.hass.services.calls if call[:2] == ("number", "set_value") and call[2].get("entity_id") == const.DEFAULT_GRID_CHARGE_CURRENT]
+        self.assertTrue(grid_calls)
+        self.assertEqual(grid_calls[-1][2]["value"], 45)
 
     def test_more_than_six_segments_is_rejected(self):
         runtime = make_runtime()

@@ -1,6 +1,6 @@
 apply_settings:
-  name: Apply settings
-  description: Apply Deye work mode, max sell power, battery discharge current and optional charge current.
+  name: Zastosuj ustawienia
+  description: Zastosuj tryb pracy Deye, maksymalną moc sprzedaży, prąd rozładowania i opcjonalnie prąd ładowania.
   fields:
     mode:
       required: true
@@ -35,9 +35,18 @@ apply_settings:
           max: 240
           step: 5
           unit_of_measurement: A
+    grid_charge_current:
+      required: false
+      description: Po pominięciu używany jest prąd ładowania z sieci zapisany w Ustawieniach domyślnych. Dodatnia wartość nie włącza automatycznie Grid Charge; jest wyłącznie limitem prądu.
+      selector:
+        number:
+          min: 0
+          max: 240
+          step: 5
+          unit_of_measurement: A
 manual_sell:
-  name: Manual sell
-  description: Switch to Selling First and set manual export limits.
+  name: Ręczna sprzedaż
+  description: Przełącz na Selling First i ustaw ręczne limity sprzedaży.
   fields:
     sell_power:
       required: true
@@ -56,8 +65,8 @@ manual_sell:
           step: 5
           unit_of_measurement: A
 charge_now:
-  name: Charge now
-  description: Start battery charging by setting the configured charge current.
+  name: Ładowanie teraz
+  description: Rozpocznij ładowanie baterii zapisanym prądem ładowania.
   fields:
     charge_current:
       required: true
@@ -68,17 +77,42 @@ charge_now:
           step: 5
           unit_of_measurement: A
 stop_selling:
-  name: Stop selling
+  name: Zatrzymaj sprzedaż
   description: Zatrzaśnij sterowanie managera, zastosuj 1:1 pełny zestaw z Ustawień domyślnych i nie zeruj automatycznie wartości liczbowych.
 restore_defaults:
-  name: Restore defaults
+  name: Przywróć ustawienia domyślne
   description: Ręcznie zastosuj ustawienia zapisane przez użytkownika w oknie Ustawienia domyślne.
 resume_manager:
   name: Włącz Manager i harmonogram
   description: "Świadomie włącza tryb Schedule i Scheduler po Stop Sell lub zatrzymaniu awaryjnym. Nie zmienia szablonu ani istniejących slotów Charge; tylko Ładowanie z sieci: TAK w konkretnym slocie Charge zezwala na fizyczne Grid Charge."
 emergency_stop:
-  name: Emergency stop
+  name: Zatrzymanie awaryjne
   description: Natychmiast zatrzaśnij sterowanie managera i zastosuj 1:1 pełny zestaw ustawień domyślnych użytkownika, włącznie z wybranym trybem.
+save_ai_settings:
+  name: Zapisz ustawienia AI
+  description: Zapisuje ustawienia używane przez okno Sugestie AI.
+  fields:
+    data:
+      name: Dane JSON
+      description: Ustawienia strategii, progów i parametrów planowania przekazane przez kartę.
+      required: true
+      selector:
+        text:
+          multiline: true
+save_ai_analysis:
+  name: Zapisz analizę AI
+  description: Zapisuje porównanie planu AI z rzeczywistą produkcją i cenami.
+  fields:
+    data:
+      name: Dane JSON
+      description: Datowana analiza wygenerowana przez okno Sugestie AI.
+      required: true
+      selector:
+        text:
+          multiline: true
+clear_ai_history:
+  name: Wyczyść historię AI
+  description: Usuwa historię analiz i sugestii AI.
 rate_ai_analysis:
   name: Oceń sugestię AI
   description: Zapisuje ocenę wybranej sugestii AI.
@@ -98,8 +132,8 @@ clear_history:
   name: Wyczyść historię i dane
   description: Usuwa historię sugestii, uczenia i porównań Solcast.
 apply_schedule_patch:
-  name: Apply schedule patch
-  description: Atomically validate and apply multiple 24-hour schedule slot changes. Intended for the bundled dashboard card.
+  name: Zastosuj łatę harmonogramu
+  description: Atomowo waliduje i zastosowuje wielokrotne zmiany slotów 24-godzinnego harmonogramu. Przeznaczone dla dołączonej karty dashboardu.
   fields:
     data:
       required: true

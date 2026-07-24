@@ -71,7 +71,7 @@ Przycisk **Zaplanuj wybrane na jutro** zapisuje dokładnie zaakceptowane godziny
 
 Wymagany jest Home Assistant `2026.6` lub nowszy.
 
-Podstawowe encje sterujące:
+Podstawowe encje sterujące wymagane do pełnego działania integracji:
 
 ```text
 select.deye_inverter_system_work_mode
@@ -79,10 +79,12 @@ number.deye_inverter_max_sell_power
 number.deye_inverter_maximum_battery_discharge_current
 number.deye_inverter_maximum_battery_charge_current
 number.deye_inverter_maximum_battery_grid_charge_current
-sensor.deye_inverter_grid_power
+sensor.deye_inverter_battery
 ```
 
-SOC baterii i cena sprzedaży są wymagane wyłącznie dla aktywnego slotu `Selling First`, gdy ustawiono dla niego odpowiedni limit. Nie są wymagane dla `Zero Export`.
+Powyższe encje muszą być dostępne, aby integracja mogła bezpiecznie sterować falownikiem. Brak odczytu SOC baterii blokuje sprzedaż z baterii w trybie `Selling First`, natomiast sloty `Zero Export` mogą nadal działać bez aktualnego SOC.
+
+Cena sprzedaży jest wymagana wyłącznie dla aktywnego slotu `Selling First`, gdy ustawiono dla niego odpowiedni limit. Nie jest wymagana dla `Zero Export`.
 
 Dla funkcji Deye Time Of Use wymagane są również:
 

@@ -53,7 +53,7 @@ Po aktualizacji otwórz **Ustawienia → Urządzenia i usługi → Deye Energy M
 
 ## Wymagane i zalecane encje
 
-Wymagane dla bezpiecznego sterowania są: tryb pracy Deye, maksymalna moc sprzedaży, maksymalny prąd rozładowania, prąd ładowania baterii oraz prąd ładowania z sieci. SOC baterii i cena sprzedaży są wymagane tylko przez aktywny slot `Selling First`, jeżeli ma odpowiedni limit. Sloty `Zero Export` nie wymagają tych danych. Pozostałe encje pomiarowe są zalecane zgodnie z używanymi funkcjami.
+Wymagane dla bezpiecznego sterowania są: tryb pracy Deye, maksymalna moc sprzedaży, maksymalny prąd rozładowania, prąd ładowania baterii, prąd ładowania z sieci oraz bieżący odczyt SOC baterii. Cena sprzedaży jest wymagana tylko przez aktywny slot `Selling First`, jeżeli ma odpowiedni limit. Sloty `Zero Export` mogą działać bez aktualnego SOC i ceny. Pozostałe encje pomiarowe są zalecane zgodnie z używanymi funkcjami.
 
 Prognoza pogody jest opcjonalnym wsparciem Solcast. Jeżeli `weather.forecast_home_2` nie istnieje, wybierz inną encję z domeny `weather`, która udostępnia prognozę godzinową. Integracja pobiera prognozy godzinowe i dzienne przez `weather.get_forecasts`; brak osobnej prognozy dziennej jest podsumowywany z dostępnych danych godzinowych.
 

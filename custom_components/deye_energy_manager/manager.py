@@ -100,6 +100,11 @@ from .const import (
     DEFAULT_TARIFF_CATALOG_URL,
     DEFAULT_GRID_POSITIVE_IS_IMPORT,
     DEFAULT_BATTERY_POSITIVE_IS_DISCHARGE,
+    DEFAULT_MAX_SELL_POWER,
+    DEFAULT_DISCHARGE_CURRENT,
+    DEFAULT_CHARGE_CURRENT,
+    DEFAULT_GRID_CHARGE_CURRENT,
+    DEFAULT_WORK_MODE_SELECT,
 )
 from .tariff_catalog import TariffCatalogManager
 from .ai_planner import build_plan_bundle
@@ -890,6 +895,24 @@ class DeyeEnergyManagerRuntime:
         return all(self.entity_available(entity_id) for entity_id in required)
 
     @property
+    def required_entities_complete(self) -> bool:
+        """Check that all entities required for full integration mapping are available.
+
+        Unlike ``data_available`` this includes the battery SOC sensor, which is
+        mandatory for complete operation and safe Selling First guards even
+        though Zero Export slots can execute without it.
+        """
+        required = [
+            self.work_mode_select,
+            self.max_sell_power_number,
+            self.discharge_current_number,
+            self.charge_current_number,
+            self.grid_charge_current_number,
+            self.battery_soc_sensor,
+        ]
+        return all(self.entity_available(entity_id) for entity_id in required)
+
+    @property
     def mapping_error(self) -> bool:
         return len(self._compress_schedule_segments()) > 6
 
@@ -1047,6 +1070,20 @@ class DeyeEnergyManagerRuntime:
         }
 
     def diagnostics(self) -> dict[str, Any]:
+        configured = {
+            self.data.get(CONF_WORK_MODE_SELECT): DEFAULT_WORK_MODE_SELECT,
+            self.data.get(CONF_MAX_SELL_POWER_NUMBER): DEFAULT_MAX_SELL_POWER,
+            self.data.get(CONF_DISCHARGE_CURRENT_NUMBER): DEFAULT_DISCHARGE_CURRENT,
+            self.data.get(CONF_CHARGE_CURRENT_NUMBER): DEFAULT_CHARGE_CURRENT,
+            self.data.get(CONF_GRID_CHARGE_CURRENT_NUMBER): DEFAULT_GRID_CHARGE_CURRENT,
+            self.data.get(CONF_BATTERY_SOC_SENSOR): DEFAULT_BATTERY_SOC,
+            self.data.get(CONF_PRICE_SENSOR): DEFAULT_PRICE_SENSOR,
+            self.data.get(CONF_GRID_POWER_SENSOR): DEFAULT_GRID_POWER_SENSOR,
+            self.data.get(CONF_PV_POWER_SENSOR): DEFAULT_PV_POWER_SENSOR,
+            self.data.get(CONF_LOAD_POWER_SENSOR): DEFAULT_LOAD_POWER_SENSOR,
+            self.data.get(CONF_BATTERY_POWER_SENSOR): DEFAULT_BATTERY_POWER_SENSOR,
+            self.data.get(CONF_WEATHER_ENTITY): DEFAULT_WEATHER_ENTITY,
+        }
         entity_ids = [self.work_mode_select, self.max_sell_power_number, self.discharge_current_number,
                       self.charge_current_number, self.grid_charge_current_number, self.battery_soc_sensor,
                       self.price_sensor, self.grid_power_sensor, self.pv_power_sensor, self.load_power_sensor,
@@ -1054,10 +1091,17 @@ class DeyeEnergyManagerRuntime:
         entities = []
         for entity_id in entity_ids:
             state = self.hass.states.get(entity_id) if entity_id else None
-            entities.append({"entity_id": entity_id or "not_configured", "state": state.state if state is not None else "missing", "ok": state is not None and state.state not in ("unknown", "unavailable")})
+            is_configured = entity_id in configured and entity_id != configured.get(entity_id)
+            entities.append({
+                "entity_id": entity_id or "not_configured",
+                "state": state.state if state is not None else "missing",
+                "ok": state is not None and state.state not in ("unknown", "unavailable"),
+                "configured": is_configured,
+                "default": entity_id == configured.get(entity_id) if entity_id else False,
+            })
         tou = self.tou_mapping_diagnostics()
         mapping_status = "ERROR" if self.mapping_error else ("TOU ERROR" if not tou["ok"] else "OK")
-        return {"integration_version": "0.7.6", "connected": self.data_available, "entities": entities,
+        return {"integration_version": "0.7.6", "connected": self.data_available, "required_entities_complete": self.required_entities_complete, "entities": entities,
                 "last_saved_at": self.last_saved_at or "never", "last_applied_at": self.last_applied_at or "never",
                 "last_error": self.last_error or "none", "last_schedule_attempt": self.last_schedule_attempt,
                 "manager_status": self.manager_status, "mapping_status": mapping_status,
@@ -3093,8 +3137,10 @@ class DeyeEnergyManagerRuntime:
         sell_power: float,
         discharge_current: float,
         charge_current: float,
+        grid_charge_current: float | None = None,
     ) -> None:
         """Apply direct inverter settings using a safe, serialized write order."""
+        effective_grid_charge_current = grid_charge_current if grid_charge_current is not None else self.default_grid_charge_current
         async with self._operation_lock:
             if mode == MODE_SELLING_FIRST and not self.sell_allowed:
                 await self.async_apply_safe_defaults("Sprzedaż zablokowana przez ochronę SOC lub ceny")
@@ -3105,7 +3151,7 @@ class DeyeEnergyManagerRuntime:
                     sell_power,
                     discharge_current,
                     charge_current,
-                    self.default_grid_charge_current,
+                    effective_grid_charge_current,
                 )
             except Exception as err:
                 await self.async_apply_safe_defaults(f"Nieprawidłowy plan ustawień: {err}")
@@ -3114,7 +3160,7 @@ class DeyeEnergyManagerRuntime:
                 await self.async_set_number(self.charge_current_number, charge_current)
                 await self.async_set_number(
                     self.grid_charge_current_number,
-                    self.default_grid_charge_current,
+                    effective_grid_charge_current,
                 )
                 await self.async_set_number(self.max_sell_power_number, sell_power)
                 await self.async_set_number(self.discharge_current_number, discharge_current)
@@ -3123,7 +3169,7 @@ class DeyeEnergyManagerRuntime:
                     sell_power,
                     discharge_current,
                     charge_current,
-                    self.default_grid_charge_current,
+                    effective_grid_charge_current,
                 )
                 if unconfirmed:
                     raise RuntimeError(f"Niepotwierdzone wartości: {'; '.join(unconfirmed)}")
@@ -3133,7 +3179,7 @@ class DeyeEnergyManagerRuntime:
                     sell_power,
                     discharge_current,
                     charge_current,
-                    self.default_grid_charge_current,
+                    effective_grid_charge_current,
                 )
                 if unconfirmed:
                     raise RuntimeError(f"Niepotwierdzone wartości końcowe: {'; '.join(unconfirmed)}")
@@ -3568,24 +3614,27 @@ class DeyeEnergyManagerRuntime:
         await self.async_update_energy_sample()
         if not self.weather_last_updated or ha_now().minute == 0:
             await self.async_update_weather_forecast()
+
+        result = True
         if self.emergency_stop:
-            return await self.async_apply_safe_defaults("Zatrzymanie awaryjne")
+            result = await self.async_apply_safe_defaults("Zatrzymanie awaryjne")
         elif self.control_mode == "Schedule" and self.mapping_error:
-            return self._report_tou_preflight_failure()
+            result = self._report_tou_preflight_failure()
         elif self.control_mode in ("Manual Sell", "Charge Battery"):
-            return await self.async_apply_targets()
+            result = await self.async_apply_targets()
         elif self.control_mode in ("Stop Sell", "Protect Battery"):
-            return await self.async_apply_safe_defaults(
+            result = await self.async_apply_safe_defaults(
                 "Sprzedaż zatrzymana" if self.control_mode == "Stop Sell" else "Aktywna ochrona baterii"
             )
         elif self.scheduler_enabled:
             if self.active_slot.enabled:
-                return await self.async_apply_targets()
+                result = await self.async_apply_targets()
             else:
                 await self.async_apply_default_values("Defaults applied by inactive slot")
+
         if self.sold_energy_today != previous_sold_energy or self.sold_value_today != previous_sold_value:
             self.notify_update()
-        return True
+        return result
 
     async def async_tick(self, *_args: Any) -> None:
         if self._tariff_catalog_manager is not None and self._tariff_catalog_manager.refresh_due():
